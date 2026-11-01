@@ -28,6 +28,14 @@ The addon icon is available at [`assets/foreverguild-icon-small.png`](assets/for
 - `/ku pvp` — toggle the PvP warning.
 - `/ku test` — send clearly synthetic `[KU]` sample messages to guild chat.
 
+## Layer Hop (v1.5)
+
+Open the **Layer Hop** tab with `/fg layer` or `/ku layer`.
+
+Only online guild members who respond from this updated addon are listed. Click a member to send a group-invite request. That member can approve the request and invite you, or decline it. You can also right-click to whisper them.
+
+**Limits:** WoW Forever may not expose a reliable layer ID to addons, so the tab displays "Layer unbekannt" rather than inventing layer numbers. A group invitation may help with layering, but cannot force or guarantee a layer switch. All participants must install v1.5+ for peer discovery and requests. In-game validation on the Forever client is still needed.
+
 ## Chat logging
 
 The optional chat-log setting is intended for the separate Discord bridge. Enable it with `/chatlog` or in `/ku opt`. Forever clients may flush `WoWChatLog.txt` only when the game exits; the addon does not repeatedly toggle logging because that can clear or rotate the file.
