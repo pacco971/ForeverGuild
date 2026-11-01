@@ -3,14 +3,14 @@
 World of Warcraft Forever guild addon by Kritisch Ungemütlich.
 
 <p align="center">
-  <img src="./assets/foreverguild-banner.png" alt="ForeverGuild Banner" width="100%">
+  <img src="./assets/foreverguild-banner.jpg" alt="ForeverGuild Banner" width="100%">
 </p>
 
 <p align="center">
-  <img src="./assets/foreverguild-ui-preview.png" alt="ForeverGuild UI preview" width="100%">
+  <img src="./assets/foreverguild-ui-preview.jpg" alt="ForeverGuild UI preview" width="100%">
 </p>
 
-The addon icon is available at [`assets/foreverguild-icon.png`](assets/foreverguild-icon.png).
+The addon icon is available at [`assets/foreverguild-icon-small.png`](assets/foreverguild-icon-small.png).
 
 ## Installation
 
