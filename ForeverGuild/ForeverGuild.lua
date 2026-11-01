@@ -59,7 +59,8 @@ local THEME = {
 }
 local function themeTexture(parent, layer, color)
   local t = parent:CreateTexture(nil, layer)
-  setColor(t, color[1], color[2], color[3], color[4])
+  if t.SetColorTexture then t:SetColorTexture(color[1], color[2], color[3], color[4])
+  else t:SetTexture(color[1], color[2], color[3], color[4]) end
   return t
 end
 
