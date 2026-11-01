@@ -1,4 +1,4 @@
--- ForeverGuild v1.4 - Gilden-Addon fuer WoW Forever
+-- ForeverGuild v1.5 - Gilden-Addon fuer WoW Forever
 -- Alle Mitglieder brauchen das Addon, damit sie auf der Karte erscheinen.
 
 local PREFIX = "FGUILD"
@@ -413,6 +413,8 @@ end
 ------------------------------------------------------------------ Liste "Wer ist wo" + Berufe-Reiter
 local ROWS, listFrame, rows, offset = 18, nil, {}, 0
 local roster, onlineInfo, view, mode = {}, {}, {}, "who"
+local layerPeers = {}
+local function layerPing() send("LY:HELLO") end
 
 local function buildRoster()
   wipe(roster); wipe(onlineInfo)
@@ -450,6 +452,18 @@ local function buildView()
     return
   end
 
+  if mode == "layers" then
+    local now = GetTime()
+    for _, d in ipairs(roster) do
+      local t = layerPeers[d.name]
+      if d.name ~= myName and t and now - t < 120 then
+        view[#view + 1] = { name = d.name, layerHop = true,
+          text = nameStr(d.name) .. "  |cff55dd88Addon aktiv|r  |cffaaaaaaLayer unbekannt|r  |cffffcc44[Hop anfragen]|r" }
+      end
+    end
+    if #view == 0 then view[1] = { text = "|cffaaaaaaKeine aktiven Mitglieder mit Layer-Hop-Erweiterung gefunden.|r" } end
+    return
+  end
   local q = ((listFrame and listFrame.search and listFrame.search:GetText()) or ""):lower()
   -- Berufe gruppieren
   local groups = {}
@@ -510,6 +524,7 @@ local function refreshList()
   buildRoster()
   buildView()
   if mode == "who" then listFrame.title:SetText(BRAND .. " - online: " .. #roster)
+  elseif mode == "layers" then listFrame.title:SetText(BRAND .. " - Layer Hop")
   else listFrame.title:SetText(BRAND .. " - Berufe & Rezepte") end
   for i = 1, ROWS do
     local d, row = view[i + offset], rows[i]
@@ -532,6 +547,11 @@ local function setMode(m)
   if listFrame then
     listFrame.search:SetShown(m == "profs")
     listFrame.searchLabel:SetShown(m == "profs")
+    if listFrame.tabLayer then
+      listFrame.tabLayer.text:SetTextColor(m == "layers" and 1 or 0.6, m == "layers" and 0.82 or 0.6, m == "layers" and 0 or 0.6)
+      listFrame.tabLayer.bg:SetVertexColor(m == "layers" and 0.2 or THEME.panel[1], m == "layers" and 0.12 or THEME.panel[2], m == "layers" and 0.08 or THEME.panel[3], 1)
+    end
+    if m == "layers" then layerPing() end
     listFrame.tabWho.text:SetTextColor(m == "who" and 1 or 0.6, m == "who" and 0.82 or 0.6, m == "who" and 0 or 0.6)
     listFrame.tabProf.text:SetTextColor(m == "profs" and 1 or 0.6, m == "profs" and 0.82 or 0.6, m == "profs" and 0 or 0.6)
     listFrame.tabWho.bg:SetVertexColor(m == "who" and 0.2 or THEME.panel[1], m == "who" and 0.12 or THEME.panel[2], m == "who" and 0.08 or THEME.panel[3], 1)
@@ -601,6 +621,7 @@ local function buildList()
   ob:SetScript("OnClick", function() openSettings() end)
   f.tabWho = makeTab(f, "Gildenkarte", 14, "who")
   f.tabProf = makeTab(f, "Berufe", 144, "profs")
+  f.tabLayer = makeTab(f, "Layer Hop", 274, "layers")
 
   f.searchLabel = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
   f.searchLabel:SetPoint("TOPLEFT", 18, -88)
@@ -632,6 +653,13 @@ local function buildList()
     r:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     r:SetScript("OnClick", function(self, btn)
       if not self.data or not self.data.name then return end
+      if self.data.layerHop then
+        if btn == "LeftButton" then
+          send("LY:ASK:" .. self.data.name)
+          out("Layer-Hop-Anfrage an " .. self.data.name .. " gesendet. Bitte Gruppeneinladung abwarten.")
+        else whisperTo(fullName(self.data.name)) end
+        return
+      end
       if btn == "LeftButton" then
         whisperTo(fullName(self.data.name))
       else
@@ -645,7 +673,10 @@ local function buildList()
       if self.data.name then
         local p = profText(self.data.name)
         GameTooltip:AddLine(p or "Berufe unbekannt (kein Addon?)", 0.8, 0.8, 0.8, true)
-        GameTooltip:AddLine("Links: Flüstern   Rechts: Einladen", 0.5, 0.5, 0.5)
+        if self.data.layerHop then
+          GameTooltip:AddLine("Links: Hop anfragen   Rechts: Fluestern", 0.5, 0.8, 0.5)
+          GameTooltip:AddLine("Layernummer unbekannt; Gruppenbeitritt garantiert keinen Wechsel.", 0.8, 0.8, 0.8, true)
+        else GameTooltip:AddLine("Links: Flüstern   Rechts: Einladen", 0.5, 0.5, 0.5) end
       end
       GameTooltip:Show()
     end)
@@ -1317,7 +1348,7 @@ function handlers.PLAYER_LOGIN()
     if miniAcc >= 0.2 then miniAcc = 0; updateMini() end
     if rosAcc >= 60 then rosAcc = 0; requestRoster() end
   end)
-  C_Timer.After(6, function() send("H"); broadcastPos(); broadcastProfs() end)
+  C_Timer.After(6, function() send("H"); broadcastPos(); broadcastProfs(); layerPing() end)
   out("Addon geladen. /ku oder /fg öffnet die Liste, /ku hilfe zeigt alle Befehle.")
 end
 
@@ -1445,6 +1476,27 @@ function handlers.CHAT_MSG_ADDON(prefix, msg, _, sender)
       for n in body:gmatch(";([^;]+)") do t[#t + 1] = n end
       refreshList()
     end
+  elseif kind == "LY" then
+    if rest == "HELLO" then
+      if name ~= myName then layerPeers[name] = GetTime(); send("LY:HERE") end
+      refreshList()
+    elseif rest == "HERE" then
+      if name ~= myName then layerPeers[name] = GetTime() end
+      refreshList()
+    else
+      local target = rest:match("^ASK:(.+)$")
+      if target == myName and name ~= myName then
+        out("|cffffcc44Layer-Hop-Anfrage von " .. name .. ".|r Lade mit /invite " .. name .. " ein.")
+        if StaticPopupDialogs and StaticPopup_Show then
+          StaticPopupDialogs["FG_LAYER_INVITE"] = StaticPopupDialogs["FG_LAYER_INVITE"] or {
+            text = "%s moechte zu dir wechseln. In Gruppe einladen?", button1 = "Einladen", button2 = "Ablehnen",
+            OnAccept = function(_, data) if data then invitePlayer(data) end end,
+            timeout = 30, whileDead = true, hideOnEscape = true, preferredIndex = 3,
+          }
+          StaticPopup_Show("FG_LAYER_INVITE", name, nil, fullName(name))
+        end
+      end
+    end
   elseif kind == "H" then
     if name ~= myName then broadcastPos(); broadcastProfs() end
   end
@@ -1527,6 +1579,9 @@ local function slash(input)
     openSettings()
   elseif cmd == "berufe" then
     openProfs()
+  elseif cmd == "layer" or cmd == "layers" then
+    if not listFrame:IsShown() then listFrame:Show() end
+    setMode("layers")
   elseif cmd == "sync" then
     syncMyRecipes()
   elseif cmd == "test" then
@@ -1570,7 +1625,7 @@ local function slash(input)
   else
     out("/fg - Liste | /fg ping | /fg punkte | /fg intervall <2-60> | /fg beruf <name>")
     out("/fg anw [liste] | /fg loot | /fg buff add/del <name> | Strg+Klick auf Karte = Ping")
-    out("/fg berufe (Reiter) | /fg sync (eigene Rezepte senden) | /fg opt (Einstellungen)")
+    out("/fg layer (Layer-Hop-Reiter) | /fg berufe (Reiter) | /fg sync (eigene Rezepte senden) | /fg opt (Einstellungen)")
     out("/ku test (Beispielmeldungen für die Discord-Bridge) | /fg tod | /fg todchat | /fg pvp | /fg pvpton | /fg creator <Name> <Handle>")
   end
 end
