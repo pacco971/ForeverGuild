@@ -2,6 +2,12 @@
 
 World of Warcraft Forever guild addon by Kritisch Ungemütlich.
 
+![ForeverGuild](assets/foreverguild-banner.png)
+
+![ForeverGuild UI preview](assets/foreverguild-ui-preview.png)
+
+The addon icon is available at [`assets/foreverguild-icon.png`](assets/foreverguild-icon.png).
+
 ## Installation
 
 1. Download this repository as a ZIP.
