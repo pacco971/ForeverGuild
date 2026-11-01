@@ -1,0 +1,9 @@
+## Interface: 16001
+## Title: |cffff7a1aKritisch Ungemütlich|r
+## Notes: Das Gilden-Addon von Kritisch Ungemütlich: Gildenkarte (Welt+Minimap), Berufe-Reiter, Pings, Todes-Log, PvP-Warnung, Tooltips, Leben-Alarm, Raid-Hilfen
+## Author: Pacco
+## Version: 1.3
+## SavedVariables: ForeverGuildDB
+
+ForeverGuild.lua
+
