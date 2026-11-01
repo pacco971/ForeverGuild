@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.4 — 2026-11-01
+
+- Restyled the guild list and death log with the ForeverGuild dark-violet/orange-gold theme.
+- Added clearer headers, active tabs, hover states, framed panels and improved spacing.
+
 ## 1.3 — 2026-11-01
 
 - Removed the automatic `LoggingChat(false)` toggle from the Forever addon; Retail/Forever clients may clear or rotate the chat log when logging is toggled.
