@@ -1,41 +1,30 @@
 # ForeverGuild
 
-ForeverGuild is a World of Warcraft Forever guild addon with a companion Discord webhook bridge.
+World of Warcraft Forever guild addon by Kritisch Ungemütlich.
 
-## Included
+## Installation
 
-- `ForeverGuild/` — in-game guild UI, roster/map tools, death log, guild announcements and `[KU]` event messages.
-- `KU_Discord_Bridge_Forever/` — Python 3 bridge that reads `WoWChatLog.txt` and posts Discord embeds.
+1. Download this repository as a ZIP.
+2. Copy the `ForeverGuild` folder into the Forever client’s `Interface/AddOns/` folder.
+3. In the character-selection screen, enable the addon. If it is marked out of date, enable “Load out of date AddOns”.
+4. Log in and run `/reload` once.
 
-## Install the addon
+## Commands
 
-Copy `ForeverGuild` into the Forever client’s `Interface/AddOns/` folder. Enable the addon in-game and reload the UI.
+- `/ku` or `/fg` — open the guild list.
+- `/ku opt` — open addon settings.
+- `/ku hilfe` — show all commands.
+- `/ku tod` — open the death log.
+- `/ku pvp` — toggle the PvP warning.
+- `/ku test` — send clearly synthetic `[KU]` sample messages to guild chat.
 
-## Configure Discord
+## Chat logging
 
-1. Copy `KU_Discord_Bridge_Forever/config.example.json` to `config.json`.
-2. Enter the Discord webhook URL in `config.json`. Never commit or share that file.
-3. Keep the bridge running on exactly one PC.
-4. In WoW, enable chat logging once with `/chatlog` and confirm the yellow message says it is being saved.
-5. Start `start_bridge.bat`, or run:
+The optional chat-log setting is intended for the separate Discord bridge. Enable it with `/chatlog` or in `/ku opt`. Forever clients may flush `WoWChatLog.txt` only when the game exits; the addon does not repeatedly toggle logging because that can clear or rotate the file.
 
-   ```text
-   python ku_bridge.py
-   ```
+`/ku test` uses synthetic sample values and does not represent the character’s real level or professions.
 
-Forever may only flush the chat log when the game exits. For a full test, start the bridge, use `/ku test`, close WoW, and wait a few seconds.
+## Scope
 
-## Tests
-
-```text
-python ku_bridge.py --test
-python ku_bridge.py --check
-python ku_bridge.py --dry-run --from-start
-```
-
-`/ku test` intentionally generates synthetic sample events. It validates the addon → chat log → bridge → Discord path; it does not describe the character’s real level or professions.
-
-## Safety
-
-The bridge reads local chat logs and sends matching `[KU]` messages to the configured webhook. Do not commit `config.json`, `state.json`, or real chat logs.
+This repository contains the ForeverGuild addon only. The Discord bridge is maintained separately.
 
