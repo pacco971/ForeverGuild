@@ -1,4 +1,4 @@
--- ForeverGuild v1.3 - Gilden-Addon fuer WoW Forever
+-- ForeverGuild v1.4 - Gilden-Addon fuer WoW Forever
 -- Alle Mitglieder brauchen das Addon, damit sie auf der Karte erscheinen.
 
 local PREFIX = "FGUILD"
@@ -47,6 +47,21 @@ end
 local lastHit = {}
 local playerGUID
 local openSettings
+local THEME = {
+  bg = { 0.035, 0.035, 0.055, 0.98 },
+  header = { 0.08, 0.07, 0.12, 1 },
+  panel = { 0.075, 0.07, 0.095, 1 },
+  panelAlt = { 0.11, 0.085, 0.12, 1 },
+  border = { 0.55, 0.25, 0.06, 0.9 },
+  accent = { 1, 0.48, 0.1, 1 },
+  text = { 0.92, 0.9, 0.86, 1 },
+  muted = { 0.56, 0.54, 0.6, 1 },
+}
+local function themeTexture(parent, layer, color)
+  local t = parent:CreateTexture(nil, layer)
+  setColor(t, color[1], color[2], color[3], color[4])
+  return t
+end
 
 local function out(msg) DEFAULT_CHAT_FRAME:AddMessage("|cffff7a1a[" .. GUILDNAME .. "]|r " .. tostring(msg)) end
 local function short(n) if not n then return n end return (strsplit("-", n)) end
@@ -518,24 +533,32 @@ local function setMode(m)
     listFrame.searchLabel:SetShown(m == "profs")
     listFrame.tabWho.text:SetTextColor(m == "who" and 1 or 0.6, m == "who" and 0.82 or 0.6, m == "who" and 0 or 0.6)
     listFrame.tabProf.text:SetTextColor(m == "profs" and 1 or 0.6, m == "profs" and 0.82 or 0.6, m == "profs" and 0 or 0.6)
+    listFrame.tabWho.bg:SetVertexColor(m == "who" and 0.2 or THEME.panel[1], m == "who" and 0.12 or THEME.panel[2], m == "who" and 0.08 or THEME.panel[3], 1)
+    listFrame.tabProf.bg:SetVertexColor(m == "profs" and 0.2 or THEME.panel[1], m == "profs" and 0.12 or THEME.panel[2], m == "profs" and 0.08 or THEME.panel[3], 1)
   end
   refreshList()
 end
 
 local function makeTab(parent, label, x, m)
   local b = CreateFrame("Button", nil, parent)
-  b:SetSize(100, 18)
-  b:SetPoint("TOPLEFT", x, -28)
+  b:SetSize(126, 30)
+  b:SetPoint("TOPLEFT", x, -50)
+  b.bg = themeTexture(b, "BACKGROUND", THEME.panel)
+  b.bg:SetAllPoints()
+  b.line = themeTexture(b, "ARTWORK", THEME.border)
+  b.line:SetPoint("BOTTOMLEFT"); b.line:SetPoint("BOTTOMRIGHT"); b.line:SetHeight(2)
   b.text = b:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-  b.text:SetAllPoints()
-  b.text:SetText("[ " .. label .. " ]")
+  b.text:SetAllPoints(); b.text:SetText(label)
+  b.text:SetTextColor(THEME.muted[1], THEME.muted[2], THEME.muted[3])
+  b:SetScript("OnEnter", function(self) self.bg:SetVertexColor(0.18, 0.12, 0.16, 1) end)
+  b:SetScript("OnLeave", function(self) self.bg:SetVertexColor(THEME.panel[1], THEME.panel[2], THEME.panel[3], 1) end)
   b:SetScript("OnClick", function() setMode(m) end)
   return b
 end
 
 local function buildList()
   local f = CreateFrame("Frame", "ForeverGuildList", UIParent)
-  f:SetSize(430, ROWS * 18 + 92)
+  f:SetSize(570, ROWS * 20 + 138)
   f:SetPoint("CENTER", 300, 0)
   f:SetFrameStrata("DIALOG")
   f:SetMovable(true); f:EnableMouse(true); f:RegisterForDrag("LeftButton")
@@ -546,30 +569,48 @@ local function buildList()
     offset = math.max(0, math.min(math.max(0, #view - ROWS), offset - delta * 3))
     refreshList()
   end)
-  local bg = f:CreateTexture(nil, "BACKGROUND"); bg:SetAllPoints(); setColor(bg, 0, 0, 0, 0.85)
+  local bg = themeTexture(f, "BACKGROUND", THEME.bg); bg:SetAllPoints()
+  local borderTop = themeTexture(f, "BORDER", THEME.border)
+  borderTop:SetPoint("TOPLEFT"); borderTop:SetPoint("TOPRIGHT"); borderTop:SetHeight(1)
+  local borderBottom = themeTexture(f, "BORDER", THEME.border)
+  borderBottom:SetPoint("BOTTOMLEFT"); borderBottom:SetPoint("BOTTOMRIGHT"); borderBottom:SetHeight(1)
+  local borderLeft = themeTexture(f, "BORDER", THEME.border)
+  borderLeft:SetPoint("TOPLEFT"); borderLeft:SetPoint("BOTTOMLEFT"); borderLeft:SetWidth(1)
+  local borderRight = themeTexture(f, "BORDER", THEME.border)
+  borderRight:SetPoint("TOPRIGHT"); borderRight:SetPoint("BOTTOMRIGHT"); borderRight:SetWidth(1)
+  local head = themeTexture(f, "ARTWORK", THEME.header)
+  head:SetPoint("TOPLEFT", 2, -2); head:SetPoint("TOPRIGHT", -2, -2); head:SetHeight(46)
+  local accent = themeTexture(f, "OVERLAY", THEME.accent)
+  accent:SetPoint("TOPLEFT", 2, -48); accent:SetPoint("TOPRIGHT", -2, -48); accent:SetHeight(2)
   f.title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-  f.title:SetPoint("TOPLEFT", 10, -10)
+  f.title:SetPoint("TOPLEFT", 16, -12)
+  f.title:SetTextColor(THEME.accent[1], THEME.accent[2], THEME.accent[3])
+  f.title:SetText(BRAND)
+  f.subtitle = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  f.subtitle:SetPoint("TOPLEFT", 18, -31)
+  f.subtitle:SetText("Gildenkarte  •  ForeverGuild")
   local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
   close:SetPoint("TOPRIGHT", 2, 2)
   local ob = CreateFrame("Button", nil, f)
-  ob:SetSize(80, 18)
-  ob:SetPoint("TOPRIGHT", -30, -10)
+  ob:SetSize(100, 24)
+  ob:SetPoint("TOPRIGHT", -34, -14)
   ob.text = ob:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-  ob.text:SetAllPoints(); ob.text:SetText("[ Optionen ]")
+  ob.text:SetAllPoints(); ob.text:SetText("⚙ Optionen")
+  ob.text:SetTextColor(THEME.text[1], THEME.text[2], THEME.text[3])
   ob:SetScript("OnClick", function() openSettings() end)
-  f.tabWho = makeTab(f, "Wer ist wo", 6, "who")
-  f.tabProf = makeTab(f, "Berufe", 106, "profs")
+  f.tabWho = makeTab(f, "Gildenkarte", 14, "who")
+  f.tabProf = makeTab(f, "Berufe", 144, "profs")
 
   f.searchLabel = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-  f.searchLabel:SetPoint("TOPLEFT", 12, -54)
+  f.searchLabel:SetPoint("TOPLEFT", 18, -88)
   f.searchLabel:SetText("Suche (Beruf/Rezept):")
   local sb = CreateFrame("EditBox", nil, f)
   sb:SetSize(240, 18)
-  sb:SetPoint("TOPLEFT", 140, -52)
+  sb:SetPoint("TOPLEFT", 166, -86)
   sb:SetFontObject("ChatFontNormal")
   sb:SetAutoFocus(false)
   sb:SetTextInsets(4, 4, 0, 0)
-  local sbg = sb:CreateTexture(nil, "BACKGROUND"); sbg:SetAllPoints(); setColor(sbg, 0.15, 0.15, 0.15, 1)
+  local sbg = sb:CreateTexture(nil, "BACKGROUND"); sbg:SetAllPoints(); setColor(sbg, THEME.panelAlt[1], THEME.panelAlt[2], THEME.panelAlt[3], 1)
   sb:SetScript("OnEscapePressed", sb.ClearFocus)
   sb:SetScript("OnEnterPressed", sb.ClearFocus)
   sb:SetScript("OnTextChanged", function() offset = 0; refreshList() end)
@@ -577,10 +618,15 @@ local function buildList()
 
   for i = 1, ROWS do
     local r = CreateFrame("Button", nil, f)
-    r:SetSize(410, 18)
-    r:SetPoint("TOPLEFT", 10, -76 - (i - 1) * 18)
+    r:SetSize(540, 20)
+    r:SetPoint("TOPLEFT", 16, -112 - (i - 1) * 20)
+    r.bg = themeTexture(r, "BACKGROUND", THEME.panel)
+    r.bg:SetAllPoints()
     r.text = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    r.text:SetPoint("LEFT"); r.text:SetWidth(410); r.text:SetJustifyH("LEFT")
+    r.text:SetPoint("LEFT", 8, 0); r.text:SetWidth(524); r.text:SetJustifyH("LEFT")
+    r.text:SetTextColor(THEME.text[1], THEME.text[2], THEME.text[3])
+    r:SetScript("OnEnter", function(self) self.bg:SetVertexColor(0.18, 0.12, 0.16, 1) end)
+    r:SetScript("OnLeave", function(self) self.bg:SetVertexColor(THEME.panel[1], THEME.panel[2], THEME.panel[3], 1) end)
     if r.text.SetWordWrap then r.text:SetWordWrap(false) end
     r:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     r:SetScript("OnClick", function(self, btn)
@@ -1061,19 +1107,24 @@ end
 
 local function buildDeathLog()
   local f = CreateFrame("Frame", "ForeverGuildDeaths", UIParent)
-  f:SetSize(380, DROWS * 16 + 40)
+  f:SetSize(520, DROWS * 20 + 92)
   f:SetPoint("CENTER", -300, 0)
   f:SetFrameStrata("DIALOG")
   f:SetMovable(true); f:EnableMouse(true); f:RegisterForDrag("LeftButton")
   f:SetScript("OnDragStart", f.StartMoving)
   f:SetScript("OnDragStop", f.StopMovingOrSizing)
-  local bg = f:CreateTexture(nil, "BACKGROUND"); bg:SetAllPoints(); setColor(bg, 0, 0, 0, 0.85)
+  local bg = themeTexture(f, "BACKGROUND", THEME.bg); bg:SetAllPoints()
+  local head = themeTexture(f, "ARTWORK", THEME.header)
+  head:SetPoint("TOPLEFT", 2, -2); head:SetPoint("TOPRIGHT", -2, -2); head:SetHeight(44)
+  local accent = themeTexture(f, "OVERLAY", THEME.accent)
+  accent:SetPoint("TOPLEFT", 2, -46); accent:SetPoint("TOPRIGHT", -2, -46); accent:SetHeight(2)
   local t = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-  t:SetPoint("TOPLEFT", 10, -10); t:SetText(BRAND .. " - Todes-Log")
+  t:SetPoint("TOPLEFT", 16, -12); t:SetText(BRAND .. "  •  Todes-Log")
   local close = CreateFrame("Button", nil, f, "UIPanelCloseButton"); close:SetPoint("TOPRIGHT", 2, 2)
   for i = 1, DROWS do
     local fs = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    fs:SetPoint("TOPLEFT", 10, -30 - (i - 1) * 16)
+    fs:SetPoint("TOPLEFT", 16, -66 - (i - 1) * 20)
+    fs:SetWidth(488); fs:SetJustifyH("LEFT")
     deathRows[i] = fs
   end
   f:SetScript("OnShow", refreshDeaths)
