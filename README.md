@@ -20,8 +20,9 @@ ForeverGuild targets WoW Forever's modern interface (`16001`). Profession ranks 
 
 ## Installation
 
-1. Download this repository as a ZIP.
-2. Copy the `ForeverGuild` folder into the Forever client’s `Interface/AddOns/` folder.
+1. Download the latest ForeverGuild release.
+2. Extract the `ForeverGuild` folder into the `Interface/AddOns/` folder of your WoW Forever installation.
+   Example: `<Forever-install-folder>/Interface/AddOns/ForeverGuild/`
 3. In the character-selection screen, enable the addon. If it is marked out of date, enable “Load out of date AddOns”.
 4. Log in and run `/reload` once.
 
