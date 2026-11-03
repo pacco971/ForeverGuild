@@ -3,6 +3,7 @@
 ## Notes: Das Gilden-Addon von Kritisch Ungemütlich: Gildenkarte (Welt+Minimap), Berufe- und Rezept-Reiter (Forever-API), Layer-Hop, Pings, Todes-Log, PvP-Warnung, Tooltips, Leben-Alarm
 ## Author: Pacco
 ## Version: 1.6
+## X-Curse-Project-ID: 1781463
 ## SavedVariables: ForeverGuildDB
 
 ForeverGuild.lua
