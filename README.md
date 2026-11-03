@@ -64,7 +64,7 @@ This repository contains the ForeverGuild addon only. The Discord bridge is main
 
 ## Automated CurseForge releases
 
-Tagged GitHub releases are packaged and uploaded automatically to CurseForge project [1781463](https://www.curseforge.com/wow/addons/foreverguild).
+Tagged GitHub releases are packaged and uploaded automatically to CurseForge project `1781463`.
 
 The workflow runs when a tag matching `v*` is pushed. Before creating a release tag:
 
