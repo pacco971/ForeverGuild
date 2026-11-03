@@ -2,6 +2,8 @@
 
 World of Warcraft Forever guild addon by Kritisch Ungemütlich.
 
+**Version 1.6 für WoW Forever (Interface 16001).**
+
 <p align="center">
   <img src="./assets/foreverguild-banner.jpg" alt="ForeverGuild Banner" width="100%">
 </p>
@@ -11,6 +13,10 @@ World of Warcraft Forever guild addon by Kritisch Ungemütlich.
 </p>
 
 The addon icon is available at [`assets/foreverguild-icon-small.png`](assets/foreverguild-icon-small.png).
+
+## Forever 1.6 / API
+
+ForeverGuild targets WoW Forever's modern interface (`16001`). Profession ranks are read through `C_SkillInfo`; recipe scans use `C_TradeSkillUI` after a profession window is opened. Use `/fg check` to verify the API, chat-log state and the SavedVariables probe in-game.
 
 ## Installation
 
@@ -27,8 +33,9 @@ The addon icon is available at [`assets/foreverguild-icon-small.png`](assets/for
 - `/ku tod` — open the death log.
 - `/ku pvp` — toggle the PvP warning.
 - `/ku test` — send clearly synthetic `[KU]` sample messages to guild chat.
+- `/fg check` — check Forever API support, chat-log status and SavedVariables loading.
 
-## Layer Hop (v1.5)
+## Layer Hop (v1.5+)
 
 Open the **Layer Hop** tab with `/fg layer` or `/ku layer`.
 
@@ -38,9 +45,17 @@ Only online guild members who respond from this updated addon are listed. Click 
 
 ## Chat logging
 
-The optional chat-log setting is intended for the separate Discord bridge. Enable it with `/chatlog` or in `/ku opt`. Forever clients may flush `WoWChatLog.txt` only when the game exits; the addon does not repeatedly toggle logging because that can clear or rotate the file.
+The optional chat-log setting is intended for the separate Discord bridge. Enable it with `/chatlog` or in `/ku opt`. ForeverGuild deliberately does not toggle logging off and on after every message, because that can clear or rotate `WoWChatLog.txt`. Depending on the client build, the file may only be flushed on logout or exit.
 
-`/ku test` uses synthetic sample values and does not represent the character’s real level or professions.
+Use `/fg check` before a bridge test. `/ku test` sends synthetic sample values and does not represent the character’s real level or professions.
+
+## SavedVariables
+
+ForeverGuild stores its data in `ForeverGuildDB`. Test persistence with `/fg check`, then change one setting, use `/reload`, and run `/fg check` again. If the probe resets, the issue is in the current Forever client’s SavedVariables loader rather than in the addon.
+
+## Discord bridge
+
+This repository intentionally contains the addon only. Discord embeds require the separate bridge, a writable `WoWChatLog.txt`, and a configured webhook outside this repository. No webhook secret or bridge credential belongs in ForeverGuild.
 
 ## Scope
 

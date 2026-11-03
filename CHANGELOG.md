@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.6 — 2026-11-03
+
+- Ported profession-rank detection to Forever's `C_SkillInfo` API.
+- Ported recipe scanning to `C_TradeSkillUI`; removed obsolete Classic skill/tradeskill calls and the restricted combat-log path.
+- Updated profession events for Forever's asynchronous trade-skill data.
+- Added `/fg check` for API, chat-log and SavedVariables diagnostics.
+- Improved chat-log status detection through `C_ChatInfo.IsLoggingChat`.
+- Updated documentation for synthetic bridge tests, SavedVariables testing and the separate Discord bridge.
+
 ## 1.4 — 2026-11-01
 
 - Restyled the guild list and death log with the ForeverGuild dark-violet/orange-gold theme.

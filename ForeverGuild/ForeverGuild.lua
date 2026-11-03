@@ -44,8 +44,6 @@ local function sendChat(msg, channel)
   elseif SendChatMessage then SendChatMessage(msg, channel) end
   if type(msg) == "string" and msg:sub(1, 4) == "[KU]" then scheduleFlush() end
 end
-local lastHit = {}
-local playerGUID
 local openSettings
 local THEME = {
   bg = { 0.035, 0.035, 0.055, 0.98 },
@@ -91,20 +89,14 @@ end
 
 ------------------------------------------------------------------ Position
 local function getPos()
-  if C_Map and C_Map.GetBestMapForUnit then
-    local m = C_Map.GetBestMapForUnit("player")
-    if not m then return end
-    local p = C_Map.GetPlayerMapPosition(m, "player")
-    if not p then return end
-    local x, y = p:GetXY()
-    if not x or (x == 0 and y == 0) then return end
-    return m, x, y
-  elseif GetPlayerMapPosition then
-    if not (WorldMapFrame and WorldMapFrame:IsShown()) and SetMapToCurrentZone then SetMapToCurrentZone() end
-    local x, y = GetPlayerMapPosition("player")
-    if not x or (x == 0 and y == 0) then return end
-    return GetCurrentMapAreaID(), x, y
-  end
+  if not (C_Map and C_Map.GetBestMapForUnit and C_Map.GetPlayerMapPosition) then return end
+  local m = C_Map.GetBestMapForUnit("player")
+  if not m then return end
+  local p = C_Map.GetPlayerMapPosition(m, "player")
+  if not p then return end
+  local x, y = p:GetXY()
+  if not x or (x == 0 and y == 0) then return end
+  return m, x, y
 end
 
 local function broadcastPos()
@@ -126,11 +118,25 @@ for _, n in ipairs({ "Alchemy", "Alchemie", "Blacksmithing", "Schmiedekunst", "E
   "First Aid", "Erste Hilfe", "Fishing", "Angeln", "Jewelcrafting", "Juwelenschleifen",
   "Inscription", "Inschriftenkunde" }) do PROFS[n] = true end
 
+local function getSkillLineCount()
+  if not (C_SkillInfo and C_SkillInfo.GetNumSkillLines) then return 0 end
+  local ok, n = pcall(C_SkillInfo.GetNumSkillLines)
+  return ok and type(n) == "number" and n or 0
+end
+
+local function getSkillLine(i)
+  if not (C_SkillInfo and C_SkillInfo.GetSkillLineInfo) then return end
+  local ok, info = pcall(C_SkillInfo.GetSkillLineInfo, i)
+  if not ok or type(info) ~= "table" then return end
+  return info.name, info.isHeader, info.rank, info.maxRank, info.skillID
+end
+
 local function broadcastProfs()
-  if not GetNumSkillLines then return end
+  local count = getSkillLineCount()
+  if count <= 0 then return end
   local list = {}
-  for i = 1, GetNumSkillLines() do
-    local name, isHeader, _, rank = GetSkillLineInfo(i)
+  for i = 1, count do
+    local name, isHeader, rank = getSkillLine(i)
     if name and not isHeader and PROFS[name] then list[#list + 1] = name .. "=" .. (rank or 0) end
   end
   if #list > 0 then
@@ -156,7 +162,7 @@ end
 
 local function viewedMap()
   if WorldMapFrame and WorldMapFrame.GetMapID then return WorldMapFrame:GetMapID() end
-  if GetCurrentMapAreaID then return GetCurrentMapAreaID() end
+  if C_Map and C_Map.GetBestMapForUnit then return C_Map.GetBestMapForUnit("player") end
 end
 
 local pinPool, pingPool, miniPool = {}, {}, {}
@@ -717,25 +723,25 @@ local function storeAndSend(prof, names)
 end
 
 local function scanTrade()
-  if not (GetNumTradeSkills and GetTradeSkillLine) then return end
-  local prof = GetTradeSkillLine()
-  if not prof or prof == "UNKNOWN" then return end
-  local names = {}
-  for i = 1, GetNumTradeSkills() do
-    local n, t = GetTradeSkillInfo(i)
-    if n and t ~= "header" and t ~= "subheader" then names[#names + 1] = (n:gsub(";", "")) end
-  end
-  if #names > 0 then storeAndSend(prof, names) end
-end
+  if not (C_TradeSkillUI and C_TradeSkillUI.GetBaseProfessionInfo
+      and C_TradeSkillUI.GetAllRecipeIDs and C_TradeSkillUI.GetRecipeInfo) then return end
 
-local function scanCraft()
-  if not (GetNumCrafts and GetCraftDisplaySkillLine) then return end
-  local prof = GetCraftDisplaySkillLine()
-  if not prof then return end
+  local okInfo, info = pcall(C_TradeSkillUI.GetBaseProfessionInfo)
+  if not okInfo or type(info) ~= "table" then return end
+  local prof = info.professionName or info.name
+  if not prof or prof == "" then return end
+
+  local okIDs, recipeIDs = pcall(C_TradeSkillUI.GetAllRecipeIDs)
+  if not okIDs or type(recipeIDs) ~= "table" then return end
+
   local names = {}
-  for i = 1, GetNumCrafts() do
-    local n, _, t = GetCraftInfo(i)
-    if n and t ~= "header" then names[#names + 1] = (n:gsub(";", "")) end
+  for _, recipeID in pairs(recipeIDs) do
+    local okRecipe, recipe = pcall(C_TradeSkillUI.GetRecipeInfo, recipeID)
+    if okRecipe and type(recipe) == "table" and recipe.name
+        and (recipe.learned == nil or recipe.learned)
+        and not recipe.isDummyRecipe then
+      names[#names + 1] = tostring(recipe.name):gsub(";", "")
+    end
   end
   if #names > 0 then storeAndSend(prof, names) end
 end
@@ -764,15 +770,9 @@ local BUFFS = { "Rallying Cry of the Dragonslayer", "Warchief's Blessing", "Spir
 local buffFrame
 
 local function getBuff(i)
-  if C_UnitAuras and C_UnitAuras.GetBuffDataByIndex then
-    local d = C_UnitAuras.GetBuffDataByIndex("player", i)
-    if d then return d.name, d.expirationTime end
-    return
-  end
-  local a, _, c, _, _, f, g = UnitBuff("player", i)
-  if not a then return end
-  if type(c) == "string" then return a, g end
-  return a, f
+  if not (C_UnitAuras and C_UnitAuras.GetBuffDataByIndex) then return end
+  local d = C_UnitAuras.GetBuffDataByIndex("player", i)
+  if d then return d.name, d.expirationTime end
 end
 
 local function buildBuffFrame()
@@ -877,6 +877,17 @@ local function refreshSettings()
   if not settingsFrame then return end
   for _, r in ipairs(settingsFrame.rows) do r.update() end
   settingsFrame.layout()
+end
+
+local function chatLogState()
+  if C_ChatInfo and C_ChatInfo.IsLoggingChat then
+    local ok, value = pcall(C_ChatInfo.IsLoggingChat)
+    if ok then return value end
+  end
+  if LoggingChat then
+    local ok, value = pcall(LoggingChat)
+    if ok then return value end
+  end
 end
 
 local function applySettings()
@@ -1107,7 +1118,7 @@ end
 local handlers = {}
 
 ------------------------------------------------------------------ Todes-Log
-local VERSION = "0.5"
+local VERSION = "1.6"
 local lastDeath = {}
 local deathFrame, deathRows = nil, {}
 local DROWS = 15
@@ -1295,17 +1306,13 @@ local function hookTooltip()
 end
 
 local f = CreateFrame("Frame")
-for _, e in ipairs({ "TRADE_SKILL_SHOW", "TRADE_SKILL_UPDATE", "CRAFT_SHOW", "CRAFT_UPDATE" }) do
+for _, e in ipairs({ "TRADE_SKILL_SHOW", "TRADE_SKILL_LIST_UPDATE",
+  "TRADE_SKILL_DATA_SOURCE_CHANGED", "TRADE_SKILL_NAME_UPDATE" }) do
   pcall(f.RegisterEvent, f, e)
 end
 f:SetScript("OnEvent", function(_, event, ...) if handlers[event] then handlers[event](...) end end)
 for _, e in ipairs({ "ADDON_LOADED", "PLAYER_LOGIN", "CHAT_MSG_ADDON", "PLAYER_LEVEL_UP", "PLAYER_DEAD",
   "GUILD_ROSTER_UPDATE", "CHAT_MSG_LOOT", "SKILL_LINES_CHANGED", "CHAT_MSG_GUILD", "PLAYER_TARGET_CHANGED", "UNIT_HEALTH", "GROUP_ROSTER_UPDATE" }) do f:RegisterEvent(e) end
--- Kampflog nur auf Classic-Clients registrieren (in Retail/Midnight ist das fuer Addons verboten)
-if WOW_PROJECT_ID and WOW_PROJECT_MAINLINE and WOW_PROJECT_ID ~= WOW_PROJECT_MAINLINE then
-  pcall(f.RegisterEvent, f, "COMBAT_LOG_EVENT_UNFILTERED")
-end
-
 function handlers.ADDON_LOADED(name)
   if name ~= "ForeverGuild" then return end
   ForeverGuildDB = ForeverGuildDB or {}
@@ -1335,7 +1342,6 @@ end
 function handlers.PLAYER_LOGIN()
   if C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix then C_ChatInfo.RegisterAddonMessagePrefix(PREFIX)
   elseif RegisterAddonMessagePrefix then RegisterAddonMessagePrefix(PREFIX) end
-  playerGUID = UnitGUID("player")
   rebuildGroup()
   DB.logApplied = DB.set.autoLog and true or false
   if DB.set.autoLog and LoggingChat then pcall(LoggingChat, true) end
@@ -1353,10 +1359,10 @@ function handlers.PLAYER_LOGIN()
 end
 
 local function checkProfMilestones()
-  if not (GetNumSkillLines and DB) then return end
+  if not (DB and C_SkillInfo and C_SkillInfo.GetSkillLineInfo) then return end
   DB.profRank = DB.profRank or {}
-  for i = 1, GetNumSkillLines() do
-    local name, isHeader, _, rank = GetSkillLineInfo(i)
+  for i = 1, getSkillLineCount() do
+    local name, isHeader, rank = getSkillLine(i)
     if name and not isHeader and PROFS[name] and rank then
       local old = DB.profRank[name]
       if old and DB.set.profMile and IsInGuild() and rank >= 75 and math.floor(rank / 75) > math.floor(old / 75) then
@@ -1386,19 +1392,6 @@ local function checkRareLoot(msg)
       end
       return
     end
-  end
-end
-
-local ENV_NAMES = { Falling = "Sturz", Drowning = "Ertrinken", Fatigue = "Erschöpfung", Fire = "Feuer",
-  Lava = "Lava", Slime = "Schleim" }
-function handlers.COMBAT_LOG_EVENT_UNFILTERED()
-  if not CombatLogGetCurrentEventInfo then return end
-  local _, sub, _, _, srcName, _, _, destGUID, _, _, _, p12 = CombatLogGetCurrentEventInfo()
-  if destGUID ~= playerGUID then return end
-  if sub == "ENVIRONMENTAL_DAMAGE" then
-    lastHit.src = ENV_NAMES[p12] or tostring(p12); lastHit.t = GetTime()
-  elseif srcName and sub:find("_DAMAGE$") then
-    lastHit.src = srcName; lastHit.t = GetTime()
   end
 end
 
@@ -1432,10 +1425,9 @@ function handlers.UNIT_HEALTH(unit)
   end
 end
 function handlers.TRADE_SKILL_SHOW() scanLater(scanTrade) end
-function handlers.TRADE_SKILL_UPDATE() scanLater(scanTrade) end
-function handlers.CRAFT_SHOW() scanLater(scanCraft) end
-function handlers.CRAFT_UPDATE() scanLater(scanCraft) end
-
+function handlers.TRADE_SKILL_LIST_UPDATE() scanLater(scanTrade) end
+function handlers.TRADE_SKILL_DATA_SOURCE_CHANGED() scanLater(scanTrade) end
+function handlers.TRADE_SKILL_NAME_UPDATE() scanLater(scanTrade) end
 function handlers.CHAT_MSG_ADDON(prefix, msg, _, sender)
   if prefix ~= PREFIX then return end
   local name = short(sender)
@@ -1512,12 +1504,10 @@ end
 function handlers.PLAYER_DEAD()
   local zone, lvl = GetZoneText() or "?", UnitLevel("player")
   local className = UnitClass("player") or ""
-  local killer = (lastHit.src and GetTime() - (lastHit.t or 0) < 15) and lastHit.src or nil
   recordDeath(myName, zone, lvl, true)
   send("D:" .. lvl .. ":" .. zone)
   if DB.set.deathChat and IsInGuild() then
     local msg = string.format("[KU] %s ist gestorben in %s (Lvl %d %s)", myName, zone, lvl, className)
-    if killer then msg = msg .. " durch " .. killer end
     sendChat(msg, "GUILD")
   end
 end
@@ -1539,6 +1529,27 @@ end
 
 
 ------------------------------------------------------------------ Slash
+local function runCheck()
+  out("ForeverGuild v1.6 | Forever-API 16001")
+  out("C_SkillInfo: " .. ((C_SkillInfo and C_SkillInfo.GetSkillLineInfo) and "OK" or "fehlt"))
+  out("C_TradeSkillUI: " .. ((C_TradeSkillUI and C_TradeSkillUI.GetAllRecipeIDs) and "OK" or "fehlt"))
+  local logging = chatLogState()
+  if logging == true then
+    out("Chatlog: AN (WoWChatLog.txt wird vom Client geschrieben)")
+  elseif logging == false then
+    out("Chatlog: AUS - /chatlog einschalten oder /fg opt nutzen")
+  else
+    out("Chatlog: Status unbekannt")
+  end
+  if DB then
+    local previous = DB.__fgProbe
+    DB.__fgProbe = true
+    out("SavedVariables-Probe: " .. (previous and "vorheriger Wert geladen" or "frische Probe; nach /reload erneut prüfen"))
+  else
+    out("SavedVariables: DB ist noch nicht geladen")
+  end
+end
+
 local function slash(input)
   local cmd, arg = (input or ""):match("^(%S*)%s*(.-)$")
   cmd = cmd:lower()
@@ -1584,6 +1595,8 @@ local function slash(input)
     setMode("layers")
   elseif cmd == "sync" then
     syncMyRecipes()
+  elseif cmd == "check" or cmd == "status" then
+    runCheck()
   elseif cmd == "test" then
     if not IsInGuild() then
       out("Du bist in keiner Gilde. Der Test braucht den Gildenchat. Ohne Gilde: Beispieldatei der Bridge nutzen.")
@@ -1596,8 +1609,11 @@ local function slash(input)
         string.format("[KU] %s hat Alchemie 150 erreicht", myName),
         string.format("[KU] %s hat |cffa335ee|Hitem:19019::::::::|h[Donnerzorn, Klinge der Sturmbringer]|h|r erbeutet", myName),
       }
-      if LoggingChat and not LoggingChat() then
+      local logging = chatLogState()
+      if logging == false then
         out("|cffff4444Achtung:|r Der Chatlog ist AUS. Ohne ihn sieht die Bridge nichts. Mit /chatlog einschalten.")
+      elseif logging == nil then
+        out("|cffffcc44Hinweis:|r Der Chatlog-Status ist auf diesem Client unbekannt.")
       end
       out("Sende " .. #lines .. " Testmeldungen in den Gildenchat ...")
       for i, l in ipairs(lines) do
@@ -1625,7 +1641,7 @@ local function slash(input)
   else
     out("/fg - Liste | /fg ping | /fg punkte | /fg intervall <2-60> | /fg beruf <name>")
     out("/fg anw [liste] | /fg loot | /fg buff add/del <name> | Strg+Klick auf Karte = Ping")
-    out("/fg layer (Layer-Hop-Reiter) | /fg berufe (Reiter) | /fg sync (eigene Rezepte senden) | /fg opt (Einstellungen)")
+    out("/fg layer (Layer-Hop-Reiter) | /fg berufe (Reiter) | /fg sync (eigene Rezepte senden) | /fg check | /fg opt (Einstellungen)")
     out("/ku test (Beispielmeldungen für die Discord-Bridge) | /fg tod | /fg todchat | /fg pvp | /fg pvpton | /fg creator <Name> <Handle>")
   end
 end
