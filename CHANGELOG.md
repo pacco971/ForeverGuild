@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.9.0 — 2026-11-05
+
+- Added a separate Guild Dashboard with online/offline state, last addon sync, level, class, professions and addon activity.
+- Clarified the existing Guild Map: it focuses on world/map positions and minimap pins, while the Dashboard is the full roster view.
+- Added a shared Guild Activity tab for deaths, level-ups, profession/recipe updates, rare loot and crafting activity.
+- Added shared Crafting Orders with open, claimed and completed states.
+- Added a Layer & Group Finder with dungeon/goal posts and direct whisper/invite actions.
+- Added Shift-click favorites, a resizable main window and clearer status/tooltips.
+
 ## 1.8.0 — 2026-11-05
 
 - Reworked the Professions tab into a guild recipe catalog.

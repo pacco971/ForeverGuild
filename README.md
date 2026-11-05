@@ -2,7 +2,7 @@
 
 World of Warcraft Forever guild addon by Kritisch Ungemütlich.
 
-**Version 1.8.0 für WoW Forever (Interface 16001).**
+**Version 1.9.0 für WoW Forever (Interface 16001).**
 
 <p align="center">
   <img src="./assets/foreverguild-banner.jpg" alt="ForeverGuild Banner" width="100%">
@@ -14,11 +14,23 @@ World of Warcraft Forever guild addon by Kritisch Ungemütlich.
 
 The addon icon is available at [`assets/foreverguild-icon-small.png`](assets/foreverguild-icon-small.png).
 
-## Forever 1.8 / API
+## Forever 1.9 / API
 
 ForeverGuild targets WoW Forever's modern interface (`16001`). Profession ranks are read through `C_SkillInfo`; recipe scans use `C_TradeSkillUI` after a profession window is opened. Use `/fg check` to verify the API, chat-log state and the SavedVariables probe in-game.
 
 The **Berufe** tab lists only recipes shared by guild members. Click a recipe to expand its crafter list; clicking a crafter opens a whisper, and each name shows whether the member is online or offline.
+
+### Gildenkarte und Dashboard
+
+**Gildenkarte** shows online members by zone and supplies the world-map/minimap pins when a member's addon shares a position. **Dashboard** is the complete roster view with online/offline status, level, class, professions, last sync and addon activity. Shift-click a member to mark or remove a favorite.
+
+### Gilden-Aktivität
+
+The activity tab collects guild deaths, level-ups, profession and recipe updates, rare loot and crafting-order changes during the current saved-data history.
+
+### Crafting-Aufträge und Finder
+
+Create an order in the **Aufträge** tab with item, quantity and note. Other members can click it to claim it; the crafter can click it again when finished. The **Finder** tab broadcasts dungeon or group goals and keeps Layer-Hop requests together with direct whisper/invite actions.
 
 ## Installation
 
@@ -37,6 +49,11 @@ The **Berufe** tab lists only recipes shared by guild members. Click a recipe to
 - `/ku pvp` — toggle the PvP warning.
 - `/ku test` — send clearly synthetic `[KU]` sample messages to guild chat.
 - `/fg check` — check Forever API support, chat-log status and SavedVariables loading.
+- `/fg dashboard` — open the full guild dashboard.
+- `/fg aktivitaet` — open the guild activity feed.
+- `/fg auftrag` — open crafting orders.
+- `/fg finder` — open the layer/group finder.
+- `/fg karte` — open the online guild map/list.
 
 ## Layer Hop (v1.5+)
 

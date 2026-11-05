@@ -443,20 +443,38 @@ end
 
 ------------------------------------------------------------------ Liste "Wer ist wo" + Berufe-Reiter
 local ROWS, listFrame, rows, offset = 18, nil, {}, 0
-local roster, onlineInfo, view, mode = {}, {}, {}, "who"
+local roster, guildRoster, onlineInfo, view, mode = {}, {}, {}, {}, "who"
 local layerPeers = {}
 local recipeExpanded = {}
+local finderPosts = {}
+local refreshList
 local function layerPing() send("LY:HELLO") end
 
-local function buildRoster()
-  wipe(roster); wipe(onlineInfo)
-  if not IsInGuild() then return end
+local function rebuildGuildRoster()
+  wipe(guildRoster)
+  if not (IsInGuild() and GetNumGuildMembers and GetGuildRosterInfo) then return end
   for i = 1, GetNumGuildMembers() do
-    local name, _, _, level, class, zone, _, _, online, _, file = GetGuildRosterInfo(i)
-    if name and online then
+    local name, rank, _, level, class, zone, _, _, online, _, file = GetGuildRosterInfo(i)
+    if name then
       local n = short(name)
-      roster[#roster + 1] = { name = n, level = level, zone = zone or "?", file = file }
-      onlineInfo[n] = { file = file }
+      fullCache[n] = name
+      rankCache[n] = rank
+      guildRoster[#guildRoster + 1] = {
+        name = n, full = name, rank = rank, level = level or 0, class = class or "?",
+        zone = zone or "?", online = online and true or false, file = file
+      }
+    end
+  end
+  table.sort(guildRoster, function(a, b) return a.name < b.name end)
+end
+
+local function buildRoster()
+  rebuildGuildRoster()
+  wipe(roster); wipe(onlineInfo)
+  for _, d in ipairs(guildRoster) do
+    if d.online then
+      roster[#roster + 1] = d
+      onlineInfo[d.name] = { file = d.file }
     end
   end
   table.sort(roster, function(a, b)
@@ -475,8 +493,28 @@ local function onlineStr(n)
   return onlineInfo[n] and "|cff55dd88online|r" or "|cff888888offline|r"
 end
 
+local function className(file)
+  return (file and LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[file]) or file or "?"
+end
+
+local function agoText(ts)
+  if not ts or ts <= 0 then return "nie gesehen" end
+  local delta = math.max(0, time() - ts)
+  if delta < 60 then return "gerade eben" end
+  if delta < 3600 then return math.floor(delta / 60) .. " Min." end
+  if delta < 86400 then return math.floor(delta / 3600) .. " Std." end
+  return math.floor(delta / 86400) .. " T."
+end
+
+local function toggleFavorite(name)
+  DB.favorites[name] = not DB.favorites[name]
+  out((DB.favorites[name] and "★ " or "☆ ") .. name .. (DB.favorites[name] and " zu Favoriten hinzugefügt." or " aus Favoriten entfernt."))
+  refreshList()
+end
+
 local function buildView()
   wipe(view)
+  local q = ((listFrame and listFrame.search and listFrame.search:GetText()) or ""):lower()
   if mode == "who" then
     local now = GetTime()
     for _, d in ipairs(roster) do
@@ -488,19 +526,101 @@ local function buildView()
     return
   end
 
-  if mode == "layers" then
-    local now = GetTime()
-    for _, d in ipairs(roster) do
-      local t = layerPeers[d.name]
-      if d.name ~= myName and t and now - t < 120 then
-        view[#view + 1] = { name = d.name, layerHop = true,
-          text = nameStr(d.name) .. "  |cff55dd88Addon aktiv|r  |cffaaaaaaLayer unbekannt|r  |cffffcc44[Hop anfragen]|r" }
+  if mode == "dashboard" then
+    local entries = {}
+    for _, d in ipairs(guildRoster) do
+      local n = d.name
+      local info = (DB.memberInfo and DB.memberInfo[n]) or members[n] or {}
+      local prof = profText(n) or "Berufe unbekannt"
+      local active = members[n] and GetTime() - members[n].t < (DB.interval * 3 + 10)
+      local searchText = (n .. " " .. (d.zone or "") .. " " .. className(d.file) .. " " .. prof):lower()
+      if q == "" or searchText:find(q, 1, true) then
+        local level = d.level or info.level or "?"
+        local star = DB.favorites[n] and "|cffffd100★|r " or ""
+        local addon = active and "|cff55dd88Addon aktiv|r" or "|cff777777Addon nicht aktuell|r"
+        entries[#entries + 1] = {
+          name = n, favorite = DB.favorites[n], online = d.online, sortLevel = level,
+          text = star .. nameStr(n) .. "|r  Lvl " .. level .. "  " .. className(d.file) ..
+            "  |cffaaaaaa" .. (d.zone or "keine Zone") .. "|r  " .. onlineStr(n) ..
+            "  " .. addon .. "  |cff777777Sync: " .. agoText(DB.memberSeen[n]) .. "|r"
+        }
       end
     end
-    if #view == 0 then view[1] = { text = "|cffaaaaaaKeine aktiven Mitglieder mit Layer-Hop-Erweiterung gefunden.|r" } end
+    table.sort(entries, function(a, b)
+      if a.favorite ~= b.favorite then return a.favorite end
+      if a.online ~= b.online then return a.online end
+      return a.name < b.name
+    end)
+    for _, d in ipairs(entries) do view[#view + 1] = d end
+    if #view == 0 then view[1] = { text = "|cffaaaaaaKeine passenden Gildenmitglieder gefunden.|r" } end
     return
   end
-  local q = ((listFrame and listFrame.search and listFrame.search:GetText()) or ""):lower()
+
+  if mode == "activity" then
+    local activity = DB.activity or {}
+    local now = time()
+    local today, week = 0, 0
+    for _, a in ipairs(activity) do
+      if a.ts then
+        if now - a.ts < 86400 then today = today + 1 end
+        if now - a.ts < 604800 then week = week + 1 end
+      end
+    end
+    if q == "" then
+      view[#view + 1] = { text = "|cffffd100Aktivität|r  Heute: " .. today .. "  •  7 Tage: " .. week .. "  •  Gesamt: " .. #activity }
+    end
+    for i = #activity, math.max(1, #activity - 99), -1 do
+      local a = activity[i]
+      if a then
+        local icon = a.kind == "death" and "|cffff5555☠|r" or a.kind == "loot" and "|cffffd100◆|r" or
+          a.kind == "level" and "|cff55dd88↑|r" or a.kind == "recipe" and "|cffc084fc✦|r" or "|cffaaaaaa•|r"
+        local line = icon .. " |cff888888" .. (a.date or "") .. "|r  " .. (a.text or "")
+        if q == "" or line:lower():find(q, 1, true) then view[#view + 1] = { name = a.name, text = line } end
+      end
+    end
+    if #view == 0 then view[1] = { text = "|cffaaaaaaNoch keine Gildenaktivität gespeichert.|r" } end
+    return
+  end
+
+  if mode == "orders" then
+    local list = {}
+    for id, o in pairs(DB.orders or {}) do
+      local line = (o.item or "Unbekannt") .. " x" .. (o.qty or 1) .. " " .. (o.note or "") .. " " .. (o.status or "open")
+      if q == "" or (line .. " " .. (o.owner or "")):lower():find(q, 1, true) then
+        list[#list + 1] = { id = id, name = o.owner, order = o, text =
+          "|cffffd100" .. (o.item or "Unbekannt") .. " x" .. (o.qty or 1) .. "|r  " ..
+          "|cffaaaaaa" .. (o.statusText or o.status or "offen") .. "|r  " ..
+          (o.owner and nameStr(o.owner) or "") .. "  " .. (o.note or "") }
+      end
+    end
+    table.sort(list, function(a, b) return (a.order.created or 0) > (b.order.created or 0) end)
+    for _, d in ipairs(list) do view[#view + 1] = d end
+    if #view == 0 then view[1] = { text = "|cffaaaaaaKeine offenen Crafting-Aufträge. Über die Felder oben einen Auftrag erstellen.|r" } end
+    return
+  end
+
+  if mode == "finder" or mode == "layers" then
+    local now = GetTime()
+    local finderQ = ((listFrame and listFrame.finderInput and listFrame.finderInput:GetText()) or ""):lower()
+    if finderQ == "dungeon / ziel / zone" then finderQ = "" end
+    for id, p in pairs(finderPosts) do
+      if now - p.t > 900 then finderPosts[id] = nil
+      elseif finderQ == "" or (p.text .. " " .. p.zone .. " " .. p.level .. " " .. p.name):lower():find(finderQ, 1, true) then
+        view[#view + 1] = { name = p.name, finderPost = p, text = "|cffffd100⌕ " .. p.text .. "|r  " ..
+          "|cffaaaaaaLvl " .. p.level .. " • " .. p.zone .. "|r  " .. nameStr(p.name) }
+      end
+    end
+    for _, d in ipairs(roster) do
+      local t = layerPeers[d.name]
+      if d.name ~= myName and t and now - t < 120 and (finderQ == "" or (d.name .. " " .. (d.zone or "") .. " " .. (d.level or "")):lower():find(finderQ, 1, true)) then
+        view[#view + 1] = { name = d.name, layerHop = true,
+          text = "|cffc084fc⇄ Layer-Hop|r  " .. nameStr(d.name) .. "|r  Lvl " .. (d.level or "?") ..
+            "  |cffaaaaaa" .. (d.zone or "Zone unbekannt") .. "|r  |cffffcc44[anfragen]|r" }
+      end
+    end
+    if #view == 0 then view[1] = { text = "|cffaaaaaaKeine passenden Gruppen- oder Layer-Spieler gefunden.|r" } end
+    return
+  end
   -- Rezeptkatalog: nur Rezepte, die ein Gildenmitglied geteilt hat.
   -- Gleiche Rezepte werden zusammengefasst; per Klick werden die Crafter aufgeklappt.
   local groups = {}
@@ -558,13 +678,16 @@ local function buildView()
   end
 end
 
-local function refreshList()
+function refreshList()
   if not listFrame or not listFrame:IsShown() then return end
   buildRoster()
   buildView()
-  if mode == "who" then listFrame.title:SetText(BRAND .. " - online: " .. #roster)
-  elseif mode == "layers" then listFrame.title:SetText(BRAND .. " - Layer Hop")
-  else listFrame.title:SetText(BRAND .. " - Berufe & Rezepte") end
+  if mode == "who" then listFrame.title:SetText(BRAND .. " - Gildenkarte: online " .. #roster)
+  elseif mode == "dashboard" then listFrame.title:SetText(BRAND .. " - Gilden-Dashboard")
+  elseif mode == "profs" then listFrame.title:SetText(BRAND .. " - Rezepte & Crafter")
+  elseif mode == "activity" then listFrame.title:SetText(BRAND .. " - Gilden-Aktivität")
+  elseif mode == "orders" then listFrame.title:SetText(BRAND .. " - Crafting-Aufträge")
+  elseif mode == "finder" or mode == "layers" then listFrame.title:SetText(BRAND .. " - Layer- & Gruppenfinder") end
   for i = 1, ROWS do
     local d, row = view[i + offset], rows[i]
     if d then row.data = d; row.text:SetText(d.text); row:Show()
@@ -584,17 +707,22 @@ end
 local function setMode(m)
   mode = m; offset = 0
   if listFrame then
-    listFrame.search:SetShown(m == "profs")
-    listFrame.searchLabel:SetShown(m == "profs")
-    if listFrame.tabLayer then
-      listFrame.tabLayer.text:SetTextColor(m == "layers" and 1 or 0.6, m == "layers" and 0.82 or 0.6, m == "layers" and 0 or 0.6)
-      listFrame.tabLayer.bg:SetVertexColor(m == "layers" and 0.2 or THEME.panel[1], m == "layers" and 0.12 or THEME.panel[2], m == "layers" and 0.08 or THEME.panel[3], 1)
+    local searchable = m == "profs" or m == "dashboard" or m == "activity"
+    listFrame.search:SetShown(searchable)
+    listFrame.searchLabel:SetShown(searchable)
+    listFrame.orderItem:SetShown(m == "orders")
+    listFrame.orderQty:SetShown(m == "orders")
+    listFrame.orderNote:SetShown(m == "orders")
+    listFrame.orderButton:SetShown(m == "orders")
+    listFrame.finderInput:SetShown(m == "finder" or m == "layers")
+    listFrame.finderButton:SetShown(m == "finder" or m == "layers")
+    local tabs = { listFrame.tabWho, listFrame.tabDashboard, listFrame.tabProf, listFrame.tabActivity, listFrame.tabOrders, listFrame.tabFinder }
+    for _, tab in ipairs(tabs) do
+      local active = tab.mode == m or (tab.mode == "finder" and m == "layers")
+      tab.text:SetTextColor(active and 1 or 0.6, active and 0.82 or 0.6, active and 0 or 0.6)
+      tab.bg:SetVertexColor(active and 0.2 or THEME.panel[1], active and 0.12 or THEME.panel[2], active and 0.08 or THEME.panel[3], 1)
     end
-    if m == "layers" then layerPing() end
-    listFrame.tabWho.text:SetTextColor(m == "who" and 1 or 0.6, m == "who" and 0.82 or 0.6, m == "who" and 0 or 0.6)
-    listFrame.tabProf.text:SetTextColor(m == "profs" and 1 or 0.6, m == "profs" and 0.82 or 0.6, m == "profs" and 0 or 0.6)
-    listFrame.tabWho.bg:SetVertexColor(m == "who" and 0.2 or THEME.panel[1], m == "who" and 0.12 or THEME.panel[2], m == "who" and 0.08 or THEME.panel[3], 1)
-    listFrame.tabProf.bg:SetVertexColor(m == "profs" and 0.2 or THEME.panel[1], m == "profs" and 0.12 or THEME.panel[2], m == "profs" and 0.08 or THEME.panel[3], 1)
+    if m == "finder" or m == "layers" then layerPing() end
   end
   refreshList()
 end
@@ -610,6 +738,7 @@ local function makeTab(parent, label, x, m)
   b.text = b:CreateFontString(nil, "OVERLAY", "GameFontNormal")
   b.text:SetAllPoints(); b.text:SetText(label)
   b.text:SetTextColor(THEME.muted[1], THEME.muted[2], THEME.muted[3])
+  b.mode = m
   b:SetScript("OnEnter", function(self) self.bg:SetVertexColor(0.18, 0.12, 0.16, 1) end)
   b:SetScript("OnLeave", function(self) self.bg:SetVertexColor(THEME.panel[1], THEME.panel[2], THEME.panel[3], 1) end)
   b:SetScript("OnClick", function() setMode(m) end)
@@ -618,10 +747,17 @@ end
 
 local function buildList()
   local f = CreateFrame("Frame", "ForeverGuildList", UIParent)
-  f:SetSize(570, ROWS * 20 + 138)
+  f:SetSize(800, ROWS * 20 + 138)
   f:SetPoint("CENTER", 300, 0)
   f:SetFrameStrata("DIALOG")
-  f:SetMovable(true); f:EnableMouse(true); f:RegisterForDrag("LeftButton")
+  f:SetMovable(true); f:SetResizable(true); f:EnableMouse(true); f:RegisterForDrag("LeftButton")
+  if f.SetResizeBounds then f:SetResizeBounds(620, ROWS * 20 + 138, 1100, 760) end
+  f:SetScript("OnSizeChanged", function(self)
+    for _, row in ipairs(rows) do
+      row:SetWidth(math.max(100, self:GetWidth() - 30))
+      row.text:SetWidth(math.max(80, self:GetWidth() - 46))
+    end
+  end)
   f:SetScript("OnDragStart", f.StartMoving)
   f:SetScript("OnDragStop", f.StopMovingOrSizing)
   f:EnableMouseWheel(true)
@@ -648,7 +784,7 @@ local function buildList()
   f.title:SetText(BRAND)
   f.subtitle = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
   f.subtitle:SetPoint("TOPLEFT", 18, -31)
-  f.subtitle:SetText("Gildenkarte  •  ForeverGuild")
+  f.subtitle:SetText("Gildenkarte • Dashboard • Berufe • Aktivität • Finder")
   local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
   close:SetPoint("TOPRIGHT", 2, 2)
   local ob = CreateFrame("Button", nil, f)
@@ -659,8 +795,11 @@ local function buildList()
   ob.text:SetTextColor(THEME.text[1], THEME.text[2], THEME.text[3])
   ob:SetScript("OnClick", function() openSettings() end)
   f.tabWho = makeTab(f, "Gildenkarte", 14, "who")
-  f.tabProf = makeTab(f, "Berufe", 144, "profs")
-  f.tabLayer = makeTab(f, "Layer Hop", 274, "layers")
+  f.tabDashboard = makeTab(f, "Dashboard", 140, "dashboard")
+  f.tabProf = makeTab(f, "Berufe", 266, "profs")
+  f.tabActivity = makeTab(f, "Aktivität", 392, "activity")
+  f.tabOrders = makeTab(f, "Aufträge", 518, "orders")
+  f.tabFinder = makeTab(f, "Finder", 644, "finder")
 
   f.searchLabel = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
   f.searchLabel:SetPoint("TOPLEFT", 18, -88)
@@ -677,14 +816,32 @@ local function buildList()
   sb:SetScript("OnTextChanged", function() offset = 0; refreshList() end)
   f.search = sb
 
+  local function makeInput(width, x, default)
+    local input = CreateFrame("EditBox", nil, f)
+    input:SetSize(width, 20); input:SetPoint("TOPLEFT", x, -84); input:SetFontObject("ChatFontNormal")
+    input:SetAutoFocus(false); input:SetTextInsets(4, 4, 0, 0); input:SetText(default)
+    local bgInput = input:CreateTexture(nil, "BACKGROUND"); bgInput:SetAllPoints(); setColor(bgInput, THEME.panelAlt[1], THEME.panelAlt[2], THEME.panelAlt[3], 1)
+    input:SetScript("OnEscapePressed", input.ClearFocus)
+    input:SetScript("OnMouseDown", function(self) if self:GetText() == default then self:SetText("") end end)
+    return input
+  end
+  f.orderItem = makeInput(190, 18, "Item / Link")
+  f.orderQty = makeInput(48, 214, "1")
+  f.orderNote = makeInput(190, 270, "Notiz")
+  f.finderInput = makeInput(300, 18, "Dungeon / Ziel / Zone")
+  f.orderButton = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+  f.orderButton:SetSize(120, 22); f.orderButton:SetPoint("TOPLEFT", 474, -83); f.orderButton:SetText("Auftrag senden")
+  f.finderButton = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+  f.finderButton:SetSize(120, 22); f.finderButton:SetPoint("TOPLEFT", 330, -83); f.finderButton:SetText("Gruppe suchen")
+
   for i = 1, ROWS do
     local r = CreateFrame("Button", nil, f)
-    r:SetSize(540, 20)
+    r:SetSize(770, 20)
     r:SetPoint("TOPLEFT", 16, -112 - (i - 1) * 20)
     r.bg = themeTexture(r, "BACKGROUND", THEME.panel)
     r.bg:SetAllPoints()
     r.text = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    r.text:SetPoint("LEFT", 8, 0); r.text:SetWidth(524); r.text:SetJustifyH("LEFT")
+    r.text:SetPoint("LEFT", 8, 0); r.text:SetWidth(754); r.text:SetJustifyH("LEFT")
     r.text:SetTextColor(THEME.text[1], THEME.text[2], THEME.text[3])
     r:SetScript("OnEnter", function(self) self.bg:SetVertexColor(0.18, 0.12, 0.16, 1) end)
     r:SetScript("OnLeave", function(self) self.bg:SetVertexColor(THEME.panel[1], THEME.panel[2], THEME.panel[3], 1) end)
