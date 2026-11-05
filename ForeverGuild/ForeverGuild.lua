@@ -1,4 +1,4 @@
--- ForeverGuild v1.5 - Gilden-Addon fuer WoW Forever
+-- ForeverGuild v1.7.0 - Gilden-Addon fuer WoW Forever
 -- Alle Mitglieder brauchen das Addon, damit sie auf der Karte erscheinen.
 
 local PREFIX = "FGUILD"
@@ -99,13 +99,38 @@ local function getPos()
   return m, x, y
 end
 
+-- Retail/modern clients can return secret values from UnitHealth and
+-- UnitHealthMax during combat. Never do arithmetic on those values.
+local function safeHealthPercent(unit)
+  if UnitHealthPercent then
+    local ok, pct
+    if CurveConstants and CurveConstants.ScaleTo100 then
+      ok, pct = pcall(UnitHealthPercent, unit, false, CurveConstants.ScaleTo100)
+    else
+      ok, pct = pcall(UnitHealthPercent, unit, false)
+    end
+    if ok then
+      local okNumber, number = pcall(function() return pct + 0 end)
+      if okNumber and type(number) == "number" then return number end
+    end
+  end
+
+  -- Legacy fallback for the Forever client. If the values are secret, the
+  -- protected calculation fails quietly and the caller keeps the last value.
+  if InCombatLockdown and InCombatLockdown() then return end
+  local ok, pct = pcall(function()
+    local max = UnitHealthMax(unit)
+    if max and max > 0 then return UnitHealth(unit) / max * 100 end
+  end)
+  if ok and type(pct) == "number" then return pct end
+end
+
 local function broadcastPos()
   local m, x, y = getPos()
   if not m then return end
   local _, file = UnitClass("player")
   local lvl = UnitLevel("player")
-  local hpmax = UnitHealthMax("player")
-  local hp = (hpmax and hpmax > 0) and math.floor(UnitHealth("player") / hpmax * 100 + 0.5) or 100
+  local hp = math.floor((safeHealthPercent("player") or (members[myName] and members[myName].hp) or 100) + 0.5)
   members[myName] = { map = m, x = x, y = y, file = file, level = lvl, hp = hp, t = GetTime() }
   send(string.format("P:%d:%.4f:%.4f:%s:%d:%d", m, x, y, file or "", lvl, hp))
 end
@@ -771,8 +796,15 @@ local buffFrame
 
 local function getBuff(i)
   if not (C_UnitAuras and C_UnitAuras.GetBuffDataByIndex) then return end
-  local d = C_UnitAuras.GetBuffDataByIndex("player", i)
-  if d then return d.name, d.expirationTime end
+  -- Aura data can be secret while the player is in combat. The worldbuff
+  -- display is optional, so skip protected reads instead of tainting the UI.
+  if InCombatLockdown and InCombatLockdown() then return end
+  local ok, d = pcall(C_UnitAuras.GetBuffDataByIndex, "player", i)
+  if not ok or type(d) ~= "table" then return end
+  local okName, name = pcall(function() return d.name .. "" end)
+  local okExp, exp = pcall(function() return d.expirationTime end)
+  if not okName or type(name) ~= "string" or not okExp then return end
+  return name, exp
 end
 
 local function buildBuffFrame()
@@ -796,8 +828,12 @@ local function buildBuffFrame()
     for i = 1, 40 do
       local name, exp = getBuff(i)
       if not name then break end
-      if tracked[name] and exp and exp > 0 then
-        local left = math.max(0, exp - now)
+      -- Do the complete expiration calculation inside pcall: expirationTime
+      -- may itself be a secret value on restricted clients.
+      local okLeft, left = pcall(function()
+        if tracked[name] and exp and exp > 0 then return math.max(0, exp - now) end
+      end)
+      if okLeft and type(left) == "number" then
         lines[#lines + 1] = string.format("%s: %d:%02d", name, left / 60, left % 60)
       end
     end
@@ -1418,8 +1454,8 @@ end
 local lastHpSend = 0
 function handlers.UNIT_HEALTH(unit)
   if unit ~= "player" or not DB then return end
-  local mx = UnitHealthMax("player")
-  if mx and mx > 0 and UnitHealth("player") / mx < 0.6 and GetTime() - lastHpSend > 3 then
+  local hp = safeHealthPercent("player")
+  if hp and hp < 60 and GetTime() - lastHpSend > 3 then
     lastHpSend = GetTime()
     broadcastPos()
   end
@@ -1650,4 +1686,5 @@ SLASH_FOREVERGUILD2 = "/foreverguild"
 SLASH_FOREVERGUILD3 = "/ku"
 SLASH_FOREVERGUILD4 = "/kritisch"
 SlashCmdList["FOREVERGUILD"] = slash
+
 
