@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.7.1 — 2026-11-05
+
+- Fixed the CurseForge/GitHub Actions package layout for the repository subfolder.
+- CurseForge now receives a clean `ForeverGuild/` addon folder instead of a nested or incomplete package.
+
 ## 1.7.0 — 2026-11-05
 
 - Fixed Retail/modern secret-value errors from `UnitHealth` and `UnitHealthMax` arithmetic.

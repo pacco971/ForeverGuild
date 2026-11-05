@@ -2,7 +2,7 @@
 
 World of Warcraft Forever guild addon by Kritisch Ungemütlich.
 
-**Version 1.6 für WoW Forever (Interface 16001).**
+**Version 1.7.1 für WoW Forever (Interface 16001).**
 
 <p align="center">
   <img src="./assets/foreverguild-banner.jpg" alt="ForeverGuild Banner" width="100%">
@@ -20,7 +20,7 @@ ForeverGuild targets WoW Forever's modern interface (`16001`). Profession ranks 
 
 ## Installation
 
-1. Download the latest ForeverGuild release.
+1. Download the latest ForeverGuild release from CurseForge or GitHub.
 2. Extract the `ForeverGuild` folder into the `Interface/AddOns/` folder of your WoW Forever installation.
    Example: `<Forever-install-folder>/Interface/AddOns/ForeverGuild/`
 3. In the character-selection screen, enable the addon. If it is marked out of date, enable “Load out of date AddOns”.
@@ -72,6 +72,6 @@ The workflow runs when a tag matching `v*` is pushed. Before creating a release 
 1. Update `## Version:` in `ForeverGuild/ForeverGuild.toc`.
 2. Update `CHANGELOG.md`.
 3. Push the commit.
-4. Create and push a matching tag, for example `v1.7.0`.
+4. Create and push a matching tag, for example `v1.7.1`.
 
 The repository secret `CURSEFORGE_API_TOKEN` is required by GitHub Actions. The token must be stored only in GitHub Actions Secrets and must never be committed.

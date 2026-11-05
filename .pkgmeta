@@ -1,0 +1,4 @@
+package-as: ForeverGuild
+
+move-folders:
+    ForeverGuild/ForeverGuild: ForeverGuild
