@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.8.0 — 2026-11-05
+
+- Reworked the Professions tab into a guild recipe catalog.
+- Shows only recipes shared by guild members and groups duplicate recipes together.
+- Click a recipe to expand its crafter list.
+- Crafter rows can be clicked to whisper directly and show online/offline status.
+- Search now matches profession, recipe name and crafter name.
+
 ## 1.7.1 — 2026-11-05
 
 - Fixed the CurseForge/GitHub Actions package layout for the repository subfolder.

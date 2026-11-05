@@ -1,4 +1,4 @@
--- ForeverGuild v1.7.0 - Gilden-Addon fuer WoW Forever
+-- ForeverGuild v1.8.0 - Gilden-Addon fuer WoW Forever
 -- Alle Mitglieder brauchen das Addon, damit sie auf der Karte erscheinen.
 
 local PREFIX = "FGUILD"
@@ -445,6 +445,7 @@ end
 local ROWS, listFrame, rows, offset = 18, nil, {}, 0
 local roster, onlineInfo, view, mode = {}, {}, {}, "who"
 local layerPeers = {}
+local recipeExpanded = {}
 local function layerPing() send("LY:HELLO") end
 
 local function buildRoster()
@@ -468,6 +469,10 @@ local function nameStr(n)
   local o = onlineInfo[n]
   if o then return classHex(o.file) .. n .. "|r" end
   return "|cff777777" .. n .. "|r"
+end
+
+local function onlineStr(n)
+  return onlineInfo[n] and "|cff55dd88online|r" or "|cff888888offline|r"
 end
 
 local function buildView()
@@ -496,57 +501,60 @@ local function buildView()
     return
   end
   local q = ((listFrame and listFrame.search and listFrame.search:GetText()) or ""):lower()
-  -- Berufe gruppieren
+  -- Rezeptkatalog: nur Rezepte, die ein Gildenmitglied geteilt hat.
+  -- Gleiche Rezepte werden zusammengefasst; per Klick werden die Crafter aufgeklappt.
   local groups = {}
-  for n, s in pairs(profs) do
-    for prof, rank in s:gmatch("([^=;]+)=(%d+)") do
-      groups[prof] = groups[prof] or {}
-      table.insert(groups[prof], { n = n, r = tonumber(rank) })
-    end
-  end
-  local pnames = {}
-  for p in pairs(groups) do
-    if q == "" or p:lower():find(q, 1, true) then pnames[#pnames + 1] = p end
-  end
-  table.sort(pnames)
-  for _, p in ipairs(pnames) do
-    local g = groups[p]
-    table.sort(g, function(a, b) if a.r ~= b.r then return a.r > b.r end return a.n < b.n end)
-    view[#view + 1] = { text = "|cffffd100" .. p .. " (" .. #g .. ")|r" }
-    for _, e in ipairs(g) do
-      local rc = DB.recipes[e.n] and DB.recipes[e.n][p]
-      view[#view + 1] = { name = e.n, text = "   " .. nameStr(e.n) .. "  " .. e.r ..
-        (rc and ("  |cff888888" .. #rc .. " Rezepte|r") or "") }
-    end
-  end
-
-  -- Rezept-Suche: wer kann was craften
-  if q ~= "" then
-    local hits = {}
-    for n, byProf in pairs(DB.recipes) do
+  for n, byProf in pairs((DB and DB.recipes) or {}) do
+    if type(byProf) == "table" then
       for prof, list in pairs(byProf) do
-        for _, rec in ipairs(list) do
-          if rec:lower():find(q, 1, true) then
-            local key = rec .. " (" .. prof .. ")"
-            hits[key] = hits[key] or {}
-            table.insert(hits[key], n)
+        if type(list) == "table" then
+          local seen = {}
+          for _, rec in ipairs(list) do
+            rec = tostring(rec or "")
+            local localKey = prof .. "\031" .. rec:lower()
+            if rec ~= "" and not seen[localKey] then
+              seen[localKey] = true
+              local searchText = (rec .. " " .. prof .. " " .. n):lower()
+              if q == "" or searchText:find(q, 1, true) then
+                groups[localKey] = groups[localKey] or { recipe = rec, prof = prof, crafters = {} }
+                groups[localKey].crafters[n] = true
+              end
+            end
           end
         end
       end
     end
-    local keys = {}
-    for k in pairs(hits) do keys[#keys + 1] = k end
-    table.sort(keys)
-    for idx, k in ipairs(keys) do
-      if idx > 200 then break end
-      table.sort(hits[k])
-      local parts = {}
-      for _, n in ipairs(hits[k]) do parts[#parts + 1] = nameStr(n) end
-      view[#view + 1] = { name = hits[k][1], text = "|cffffd100" .. k .. "|r: " .. table.concat(parts, ", ") }
+  end
+
+  local keys = {}
+  for key in pairs(groups) do keys[#keys + 1] = key end
+  table.sort(keys, function(a, b)
+    local ga, gb = groups[a], groups[b]
+    if ga.prof ~= gb.prof then return ga.prof < gb.prof end
+    return ga.recipe:lower() < gb.recipe:lower()
+  end)
+
+  for idx, key in ipairs(keys) do
+    if idx > 200 then break end
+    local g = groups[key]
+    local crafters = {}
+    for n in pairs(g.crafters) do crafters[#crafters + 1] = n end
+    table.sort(crafters)
+    local expanded = recipeExpanded[key]
+    view[#view + 1] = {
+      recipeGroup = key,
+      recipeCrafters = crafters,
+      text = (expanded and "|cffffd100▾ " or "|cffffd100▸ ") .. g.recipe .. "|r  |cffaaaaaa" ..
+        g.prof .. " • " .. #crafters .. " Crafter|r"
+    }
+    if expanded then
+      for _, n in ipairs(crafters) do
+        view[#view + 1] = { name = n, recipeChild = true, text = "    ↳ " .. nameStr(n) .. "  " .. onlineStr(n) }
+      end
     end
   end
   if #view == 0 then
-    view[1] = { text = "|cff888888Nichts gefunden. Rezepte erscheinen erst, wenn der Crafter sein Berufefenster geöffnet hat.|r" }
+    view[1] = { text = "|cff888888Keine gespeicherten Gildenrezepte gefunden. Ein Crafter muss sein Berufefenster öffnen.|r" }
   end
 end
 
@@ -656,7 +664,7 @@ local function buildList()
 
   f.searchLabel = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
   f.searchLabel:SetPoint("TOPLEFT", 18, -88)
-  f.searchLabel:SetText("Suche (Beruf/Rezept):")
+  f.searchLabel:SetText("Suche (Beruf/Rezept/Crafter):")
   local sb = CreateFrame("EditBox", nil, f)
   sb:SetSize(240, 18)
   sb:SetPoint("TOPLEFT", 166, -86)
@@ -683,7 +691,15 @@ local function buildList()
     if r.text.SetWordWrap then r.text:SetWordWrap(false) end
     r:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     r:SetScript("OnClick", function(self, btn)
-      if not self.data or not self.data.name then return end
+      if not self.data or (not self.data.name and not self.data.recipeGroup) then return end
+      if self.data.recipeGroup then
+        if btn == "LeftButton" then
+          recipeExpanded[self.data.recipeGroup] = not recipeExpanded[self.data.recipeGroup]
+          offset = 0
+          refreshList()
+        end
+        return
+      end
       if self.data.layerHop then
         if btn == "LeftButton" then
           send("LY:ASK:" .. self.data.name)
@@ -701,6 +717,14 @@ local function buildList()
       if not self.data then return end
       GameTooltip:SetOwner(self, "ANCHOR_LEFT")
       GameTooltip:AddLine(self.data.text, 1, 1, 1, true)
+      if self.data.recipeGroup then
+        GameTooltip:AddLine("Links: Crafter anzeigen/verbergen", 0.5, 0.8, 0.5, true)
+        for _, n in ipairs(self.data.recipeCrafters or {}) do
+          GameTooltip:AddLine(nameStr(n) .. "  " .. onlineStr(n), 0.8, 0.8, 0.8, true)
+        end
+        GameTooltip:Show()
+        return
+      end
       if self.data.name then
         local p = profText(self.data.name)
         GameTooltip:AddLine(p or "Berufe unbekannt (kein Addon?)", 0.8, 0.8, 0.8, true)

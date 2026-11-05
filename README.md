@@ -2,7 +2,7 @@
 
 World of Warcraft Forever guild addon by Kritisch Ungemütlich.
 
-**Version 1.7.1 für WoW Forever (Interface 16001).**
+**Version 1.8.0 für WoW Forever (Interface 16001).**
 
 <p align="center">
   <img src="./assets/foreverguild-banner.jpg" alt="ForeverGuild Banner" width="100%">
@@ -14,9 +14,11 @@ World of Warcraft Forever guild addon by Kritisch Ungemütlich.
 
 The addon icon is available at [`assets/foreverguild-icon-small.png`](assets/foreverguild-icon-small.png).
 
-## Forever 1.6 / API
+## Forever 1.8 / API
 
 ForeverGuild targets WoW Forever's modern interface (`16001`). Profession ranks are read through `C_SkillInfo`; recipe scans use `C_TradeSkillUI` after a profession window is opened. Use `/fg check` to verify the API, chat-log state and the SavedVariables probe in-game.
+
+The **Berufe** tab lists only recipes shared by guild members. Click a recipe to expand its crafter list; clicking a crafter opens a whisper, and each name shows whether the member is online or offline.
 
 ## Installation
 
