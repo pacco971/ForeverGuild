@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.7.0 — 2026-11-05
+
+- Fixed Retail/modern secret-value errors from `UnitHealth` and `UnitHealthMax` arithmetic.
+- Switched health percentage checks to the safe `UnitHealthPercent` API with a protected legacy fallback.
+- Guarded worldbuff aura reads and expiration calculations when aura data is restricted or secret.
+- Prevented repeated taint/error spam from the health alert and worldbuff timer.
+
 ## 1.6 — 2026-11-03
 
 - Ported profession-rank detection to Forever's `C_SkillInfo` API.
@@ -23,4 +30,3 @@
 ## 1.2
 
 - Added the Forever addon and its Discord bridge.
-
