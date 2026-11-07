@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.10.0 — 2026-11-07
+
+- Added experimental Forever layer detection from nearby creature and vehicle GUIDs.
+- Added a dedicated Layer tab with friendly layer labels, raw IDs, zone, last-change time and peer status.
+- Added guild, party/raid, instance-group and direct addon-message layer discovery.
+- Added `Hop Any`, targeted hop requests, optional automatic layer hosting and `/fg layer scan|hop|host` commands.
+- Pauses layer scanning in combat and instances to avoid restricted or secret client values.
+
+## 1.9.2 — 2026-11-05
+
+- Der eigene Charakter wird in der Rezept-/Crafterliste auch bei einem verzögerten Gildenroster sicher als online angezeigt.
+- Asynchrone Roster-Updates können den lokalen Crafter nicht mehr fälschlich als offline markieren.
+
+## 1.9.1 — 2026-11-05
+
+- Retail-/Forever-Tooltip-Hooks behandeln geschützte „secret“ Unit-Werte sicher.
+- PvP-Warnung überspringt nicht lesbare Target-Werte, statt die Kamera-/Target-Kette zu tainten.
+- Spieler-Tooltip ergänzt Gildeninfos nur noch, wenn Unit-Token, Name und Status sicher auslesbar sind.
+
 ## 1.9.0 — 2026-11-05
 
 - Added a separate Guild Dashboard with online/offline state, last addon sync, level, class, professions and addon activity.

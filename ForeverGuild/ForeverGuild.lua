@@ -1,4 +1,4 @@
--- ForeverGuild v1.8.0 - Gilden-Addon fuer WoW Forever
+-- ForeverGuild v1.10.0 - Gilden-Addon fuer WoW Forever
 -- Alle Mitglieder brauchen das Addon, damit sie auf der Karte erscheinen.
 
 local PREFIX = "FGUILD"
@@ -64,6 +64,9 @@ end
 
 local function out(msg) DEFAULT_CHAT_FRAME:AddMessage("|cffff7a1a[" .. GUILDNAME .. "]|r " .. tostring(msg)) end
 local function short(n) if not n then return n end return (strsplit("-", n)) end
+local function isLocalMember(n)
+  return n and myName and short(n) == short(myName)
+end
 local function setColor(tex, r, g, b, a)
   if tex.SetColorTexture then tex:SetColorTexture(r, g, b, a) else tex:SetTexture(r, g, b, a) end
 end
@@ -445,10 +448,15 @@ end
 local ROWS, listFrame, rows, offset = 18, nil, {}, 0
 local roster, guildRoster, onlineInfo, view, mode = {}, {}, {}, {}, "who"
 local layerPeers = {}
+local layerState = {
+  map = nil, id = nil, zone = nil, t = 0, status = "unknown",
+  changedAt = 0, source = nil,
+}
+local layerScan, layerSummaryText, layerPeerFresh, layerPeerText
+local layerPing, requestLayerHop, layerHopAny
 local recipeExpanded = {}
 local finderPosts = {}
 local refreshList
-local function layerPing() send("LY:HELLO") end
 
 local function rebuildGuildRoster()
   wipe(guildRoster)
@@ -461,7 +469,7 @@ local function rebuildGuildRoster()
       rankCache[n] = rank
       guildRoster[#guildRoster + 1] = {
         name = n, full = name, rank = rank, level = level or 0, class = class or "?",
-        zone = zone or "?", online = online and true or false, file = file
+        zone = zone or "?", online = online and true or isLocalMember(n), file = file
       }
     end
   end
@@ -477,6 +485,13 @@ local function buildRoster()
       onlineInfo[d.name] = { file = d.file }
     end
   end
+  -- The local player can be missing or stale in the asynchronous guild
+  -- roster for a short time. A recipe learned by the player must never be
+  -- displayed as coming from an offline crafter.
+  if myName and not onlineInfo[myName] then
+    local _, file = UnitClass and UnitClass("player")
+    onlineInfo[myName] = { file = file, localPlayer = true }
+  end
   table.sort(roster, function(a, b)
     if a.zone ~= b.zone then return a.zone < b.zone end
     return a.name < b.name
@@ -490,7 +505,7 @@ local function nameStr(n)
 end
 
 local function onlineStr(n)
-  return onlineInfo[n] and "|cff55dd88online|r" or "|cff888888offline|r"
+  return (isLocalMember(n) or onlineInfo[n]) and "|cff55dd88online|r" or "|cff888888offline|r"
 end
 
 local function className(file)
@@ -539,7 +554,7 @@ local function buildView()
         local star = DB.favorites[n] and "|cffffd100★|r " or ""
         local addon = active and "|cff55dd88Addon aktiv|r" or "|cff777777Addon nicht aktuell|r"
         entries[#entries + 1] = {
-          name = n, favorite = DB.favorites[n], online = d.online, sortLevel = level,
+          name = n, favorite = DB.favorites[n], online = isLocalMember(n) or d.online, sortLevel = level,
           text = star .. nameStr(n) .. "|r  Lvl " .. level .. "  " .. className(d.file) ..
             "  |cffaaaaaa" .. (d.zone or "keine Zone") .. "|r  " .. onlineStr(n) ..
             "  " .. addon .. "  |cff777777Sync: " .. agoText(DB.memberSeen[n]) .. "|r"
@@ -599,7 +614,43 @@ local function buildView()
     return
   end
 
-  if mode == "finder" or mode == "layers" then
+  if mode == "layers" then
+    view[#view + 1] = { text = layerSummaryText and layerSummaryText() or "|cffaaaaaaLayer-Daten werden geladen ...|r", layerSummary = true }
+    view[#view + 1] = { text = "|cff888888Klick auf einen bekannten Layer für eine Hop-Anfrage. Hop Any nimmt einen anderen bekannten Layer.|r", layerSummary = true }
+    local finderQ = ((listFrame and listFrame.finderInput and listFrame.finderInput:GetText()) or ""):lower()
+    if finderQ == "zone / layer / spieler" or finderQ == "dungeon / ziel / zone" then finderQ = "" end
+    local seen = {}
+    for _, d in ipairs(roster) do
+      local p = layerPeers[d.name]
+      if d.name ~= myName and layerPeerFresh and layerPeerFresh(p) then
+        seen[d.name] = true
+        local hay = (d.name .. " " .. (d.zone or "") .. " " .. (p.zone or "") .. " " .. tostring(p.layer or "")):lower()
+        if finderQ == "" or hay:find(finderQ, 1, true) then
+          view[#view + 1] = { name = d.name, layerHop = true, layer = p,
+            text = "|cffc084fc⇄ " .. (layerPeerText and layerPeerText(p) or "Layer") .. "|r  " ..
+              nameStr(d.name) .. "|r  Lvl " .. (d.level or "?") .. "  |cffaaaaaa" ..
+              (p.zone or d.zone or "Zone unbekannt") .. "|r  " .. (p.host and "|cff55dd88Host|r" or "") }
+        end
+      end
+    end
+    -- Direkte Layer-Peers können auch außerhalb des aktuellen Gildenrosters
+    -- bekannt sein. Sie werden nur angezeigt, wenn sie selbst geantwortet haben.
+    for n, p in pairs(layerPeers) do
+      if n ~= myName and not seen[n] and layerPeerFresh and layerPeerFresh(p) then
+        local hay = (n .. " " .. (p.zone or "") .. " " .. tostring(p.layer or "")):lower()
+        if finderQ == "" or hay:find(finderQ, 1, true) then
+          view[#view + 1] = { name = n, layerHop = true, layer = p,
+            text = "|cffc084fc⇄ " .. (layerPeerText and layerPeerText(p) or "Layer") .. "|r  " ..
+              nameStr(n) .. "|r  |cffaaaaaa" .. (p.zone or "Zone unbekannt") .. "|r  " ..
+              (p.host and "|cff55dd88Host|r" or "") }
+        end
+      end
+    end
+    if #view == 2 then view[#view + 1] = { text = "|cffaaaaaaKeine bestätigten Layer-Peers gefunden. Bitte aktualisieren oder andere Gildenmitglieder ebenfalls /fg layer testen lassen.|r" } end
+    return
+  end
+
+  if mode == "finder" then
     local now = GetTime()
     local finderQ = ((listFrame and listFrame.finderInput and listFrame.finderInput:GetText()) or ""):lower()
     if finderQ == "dungeon / ziel / zone" then finderQ = "" end
@@ -612,7 +663,7 @@ local function buildView()
     end
     for _, d in ipairs(roster) do
       local t = layerPeers[d.name]
-      if d.name ~= myName and t and now - t < 120 and (finderQ == "" or (d.name .. " " .. (d.zone or "") .. " " .. (d.level or "")):lower():find(finderQ, 1, true)) then
+      if d.name ~= myName and t and t.t and now - t.t < 120 and (finderQ == "" or (d.name .. " " .. (d.zone or "") .. " " .. (d.level or "")):lower():find(finderQ, 1, true)) then
         view[#view + 1] = { name = d.name, layerHop = true,
           text = "|cffc084fc⇄ Layer-Hop|r  " .. nameStr(d.name) .. "|r  Lvl " .. (d.level or "?") ..
             "  |cffaaaaaa" .. (d.zone or "Zone unbekannt") .. "|r  |cffffcc44[anfragen]|r" }
@@ -687,7 +738,8 @@ function refreshList()
   elseif mode == "profs" then listFrame.title:SetText(BRAND .. " - Rezepte & Crafter")
   elseif mode == "activity" then listFrame.title:SetText(BRAND .. " - Gilden-Aktivität")
   elseif mode == "orders" then listFrame.title:SetText(BRAND .. " - Crafting-Aufträge")
-  elseif mode == "finder" or mode == "layers" then listFrame.title:SetText(BRAND .. " - Layer- & Gruppenfinder") end
+  elseif mode == "finder" then listFrame.title:SetText(BRAND .. " - Gruppenfinder")
+  elseif mode == "layers" then listFrame.title:SetText(BRAND .. " - Layer-Hop") end
   for i = 1, ROWS do
     local d, row = view[i + offset], rows[i]
     if d then row.data = d; row.text:SetText(d.text); row:Show()
@@ -716,9 +768,11 @@ local function setMode(m)
     listFrame.orderButton:SetShown(m == "orders")
     listFrame.finderInput:SetShown(m == "finder" or m == "layers")
     listFrame.finderButton:SetShown(m == "finder" or m == "layers")
-    local tabs = { listFrame.tabWho, listFrame.tabDashboard, listFrame.tabProf, listFrame.tabActivity, listFrame.tabOrders, listFrame.tabFinder }
+    listFrame.finderButton:SetText(m == "layers" and "Layer aktualisieren" or "Gruppe suchen")
+    if listFrame.layerHopButton then listFrame.layerHopButton:SetShown(m == "layers") end
+    local tabs = { listFrame.tabWho, listFrame.tabDashboard, listFrame.tabProf, listFrame.tabActivity, listFrame.tabOrders, listFrame.tabLayer, listFrame.tabFinder }
     for _, tab in ipairs(tabs) do
-      local active = tab.mode == m or (tab.mode == "finder" and m == "layers")
+      local active = tab.mode == m
       tab.text:SetTextColor(active and 1 or 0.6, active and 0.82 or 0.6, active and 0 or 0.6)
       tab.bg:SetVertexColor(active and 0.2 or THEME.panel[1], active and 0.12 or THEME.panel[2], active and 0.08 or THEME.panel[3], 1)
     end
@@ -729,7 +783,7 @@ end
 
 local function makeTab(parent, label, x, m)
   local b = CreateFrame("Button", nil, parent)
-  b:SetSize(126, 30)
+  b:SetSize(108, 30)
   b:SetPoint("TOPLEFT", x, -50)
   b.bg = themeTexture(b, "BACKGROUND", THEME.panel)
   b.bg:SetAllPoints()
@@ -784,7 +838,7 @@ local function buildList()
   f.title:SetText(BRAND)
   f.subtitle = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
   f.subtitle:SetPoint("TOPLEFT", 18, -31)
-  f.subtitle:SetText("Gildenkarte • Dashboard • Berufe • Aktivität • Finder")
+  f.subtitle:SetText("Gildenkarte • Dashboard • Berufe • Aktivität • Aufträge • Layer • Finder")
   local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
   close:SetPoint("TOPRIGHT", 2, 2)
   local ob = CreateFrame("Button", nil, f)
@@ -795,11 +849,12 @@ local function buildList()
   ob.text:SetTextColor(THEME.text[1], THEME.text[2], THEME.text[3])
   ob:SetScript("OnClick", function() openSettings() end)
   f.tabWho = makeTab(f, "Gildenkarte", 14, "who")
-  f.tabDashboard = makeTab(f, "Dashboard", 140, "dashboard")
-  f.tabProf = makeTab(f, "Berufe", 266, "profs")
-  f.tabActivity = makeTab(f, "Aktivität", 392, "activity")
-  f.tabOrders = makeTab(f, "Aufträge", 518, "orders")
-  f.tabFinder = makeTab(f, "Finder", 644, "finder")
+  f.tabDashboard = makeTab(f, "Dashboard", 122, "dashboard")
+  f.tabProf = makeTab(f, "Berufe", 230, "profs")
+  f.tabActivity = makeTab(f, "Aktivität", 338, "activity")
+  f.tabOrders = makeTab(f, "Aufträge", 446, "orders")
+  f.tabLayer = makeTab(f, "Layer", 554, "layers")
+  f.tabFinder = makeTab(f, "Finder", 662, "finder")
 
   f.searchLabel = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
   f.searchLabel:SetPoint("TOPLEFT", 18, -88)
@@ -833,6 +888,16 @@ local function buildList()
   f.orderButton:SetSize(120, 22); f.orderButton:SetPoint("TOPLEFT", 474, -83); f.orderButton:SetText("Auftrag senden")
   f.finderButton = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
   f.finderButton:SetSize(120, 22); f.finderButton:SetPoint("TOPLEFT", 330, -83); f.finderButton:SetText("Gruppe suchen")
+  f.finderButton:SetScript("OnClick", function()
+    if mode == "layers" then
+      layerPing()
+      refreshList()
+      out("Layer-Daten aktualisiert.")
+    end
+  end)
+  f.layerHopButton = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+  f.layerHopButton:SetSize(120, 22); f.layerHopButton:SetPoint("TOPLEFT", 456, -83); f.layerHopButton:SetText("Hop Any")
+  f.layerHopButton:SetScript("OnClick", function() if mode == "layers" and layerHopAny then layerHopAny() end end)
 
   for i = 1, ROWS do
     local r = CreateFrame("Button", nil, f)
@@ -859,8 +924,7 @@ local function buildList()
       end
       if self.data.layerHop then
         if btn == "LeftButton" then
-          send("LY:ASK:" .. self.data.name)
-          out("Layer-Hop-Anfrage an " .. self.data.name .. " gesendet. Bitte Gruppeneinladung abwarten.")
+          if requestLayerHop then requestLayerHop(self.data.name, self.data.layer) end
         else whisperTo(fullName(self.data.name)) end
         return
       end
@@ -887,7 +951,9 @@ local function buildList()
         GameTooltip:AddLine(p or "Berufe unbekannt (kein Addon?)", 0.8, 0.8, 0.8, true)
         if self.data.layerHop then
           GameTooltip:AddLine("Links: Hop anfragen   Rechts: Fluestern", 0.5, 0.8, 0.5)
-          GameTooltip:AddLine("Layernummer unbekannt; Gruppenbeitritt garantiert keinen Wechsel.", 0.8, 0.8, 0.8, true)
+          local p = self.data.layer
+          GameTooltip:AddLine((layerPeerText and p and layerPeerText(p) or "Layer unbekannt") ..
+            " • Gruppenbeitritt kann den Layer wechseln.", 0.8, 0.8, 0.8, true)
         else GameTooltip:AddLine("Links: Flüstern   Rechts: Einladen", 0.5, 0.5, 0.5) end
       end
       GameTooltip:Show()
@@ -1030,7 +1096,7 @@ local ORANGE = { 1, 0.48, 0.1 }
 local DEFAULTS = { dots = true, mini = true, icons = false, showName = false, showLevel = false,
   showRank = false, showHealth = false, iconSize = 13, miniSize = 10, filter = "off", minL = 1, maxL = 100,
   below = 5, above = 5, hpAlert = 0, deathChat = true, milestones = true, profMile = true, rareLoot = true,
-  autoLog = false, labelSize = 0, miniLabel = true, hideGroup = true }
+  autoLog = false, labelSize = 0, miniLabel = true, hideGroup = true, layerHost = false }
 
 local SETTINGS = {
   { section = "Karte" },
@@ -1074,6 +1140,9 @@ local SETTINGS = {
   { type = "toggle", key = "rareLoot", label = "Epische Funde melden" },
   { type = "toggle", key = "autoLog", label = "Chatlog für die Discord-Bridge",
     hint = "Schreibt den Chat in WoWChatLog.txt (auch Flüstern)" },
+  { section = "Layer-Hop" },
+  { type = "toggle", key = "layerHost", label = "Layer-Hop-Anfragen automatisch hosten",
+    hint = "Lädt passende Spieler nur ein, wenn du auf dem angefragten Layer bist" },
 }
 
 local alertT = {}
@@ -1335,7 +1404,7 @@ end
 local handlers = {}
 
 ------------------------------------------------------------------ Todes-Log
-local VERSION = "1.6"
+local VERSION = "1.10.0"
 local lastDeath = {}
 local deathFrame, deathRows = nil, {}
 local DROWS = 15
@@ -1447,6 +1516,269 @@ end
 local pvpFrame
 local pvpSeen = {}
 
+-- Retail's tooltip and target APIs can return opaque "secret" values while
+-- Blizzard is processing a protected world-cursor tooltip.  Never branch on
+-- such a value and never pass a secret unit token into another Unit* API.
+local function isSecretValue(value)
+  if type(issecretvalue) ~= "function" then return false end
+  local ok, secret = pcall(issecretvalue, value)
+  return ok and secret == true
+end
+
+local function publicUnitToken(value)
+  if type(value) ~= "string" or isSecretValue(value) then return nil end
+  return value
+end
+
+local function publicString(fn, ...)
+  if type(fn) ~= "function" then return nil end
+  local ok, value = pcall(fn, ...)
+  if not ok or type(value) ~= "string" or isSecretValue(value) then return nil end
+  return value
+end
+
+local function publicBool(fn, ...)
+  if type(fn) ~= "function" then return nil end
+  local ok, value = pcall(fn, ...)
+  if not ok or type(value) ~= "boolean" or isSecretValue(value) then return nil end
+  return value
+end
+
+------------------------------------------------------------------ Layer-Hop / Layer-Net
+-- Forever exposes no documented GetAllLayers()/SwitchToLayer() API.  The
+-- client does, however, expose a layer-like zone UID in nearby creature and
+-- vehicle GUIDs.  This is intentionally treated as experimental: values are
+-- read only outside combat/instances and are never used for secure actions.
+local LAYER_STALE = 180
+local LAYER_SEND_GAP = 12
+local layerLastSent = 0
+
+local function layerUnitGUID(unit)
+  if type(unit) ~= "string" or type(UnitGUID) ~= "function" then return nil end
+  local ok, guid = pcall(UnitGUID, unit)
+  if not ok or type(guid) ~= "string" or isSecretValue(guid) then return nil end
+  return guid
+end
+
+local function layerIDFromGUID(guid)
+  if type(guid) ~= "string" or isSecretValue(guid) then return nil end
+  local kind, _, _, _, zoneUID = strsplit("-", guid)
+  if kind ~= "Creature" and kind ~= "Vehicle" then return nil end
+  local id = tonumber(zoneUID)
+  if not id or id <= 0 then return nil end
+  return id
+end
+
+local function layerMapID()
+  if not (C_Map and C_Map.GetBestMapForUnit) then return nil end
+  local ok, map = pcall(C_Map.GetBestMapForUnit, "player")
+  if ok and type(map) == "number" and not isSecretValue(map) then return map end
+end
+
+local function layerZoneText()
+  local ok, zone = pcall(GetZoneText)
+  if ok and type(zone) == "string" and not isSecretValue(zone) and zone ~= "" then return zone end
+  return "Zone unbekannt"
+end
+
+local function layerInInstance()
+  if type(IsInInstance) ~= "function" then return false end
+  local ok, inside = pcall(IsInInstance)
+  return ok and inside == true
+end
+
+local function layerCandidateUnits()
+  local units = { "target", "mouseover" }
+  if C_NamePlate and C_NamePlate.GetNamePlates then
+    local ok, plates = pcall(C_NamePlate.GetNamePlates)
+    if ok and type(plates) == "table" then
+      for _, plate in ipairs(plates) do
+        local okUnit, unit = pcall(function()
+          local frame = plate and plate.UnitFrame
+          return frame and frame.unit
+        end)
+        if not okUnit then unit = nil end
+        if type(unit) == "string" and not isSecretValue(unit) then units[#units + 1] = unit end
+      end
+    end
+  end
+  return units
+end
+
+local function layerDetectID()
+  local counts = {}
+  for _, unit in ipairs(layerCandidateUnits()) do
+    local id = layerIDFromGUID(layerUnitGUID(unit))
+    if id then counts[id] = (counts[id] or 0) + 1 end
+  end
+  local best, score = nil, 0
+  for id, n in pairs(counts) do
+    if n > score then best, score = id, n end
+  end
+  return best, score
+end
+
+local function layerRememberID(map, id)
+  if not (DB and map and id) then return end
+  DB.layerIds = DB.layerIds or {}
+  local key = tostring(map)
+  DB.layerIds[key] = DB.layerIds[key] or {}
+  for _, known in ipairs(DB.layerIds[key]) do if known == id then return end end
+  DB.layerIds[key][#DB.layerIds[key] + 1] = id
+end
+
+local function layerLabel(map, id)
+  if not (map and id) then return "Layer unbekannt" end
+  local ids, seen = {}, {}
+  local function add(value)
+    value = tonumber(value)
+    if value and not seen[value] then seen[value] = true; ids[#ids + 1] = value end
+  end
+  if DB and DB.layerIds and DB.layerIds[tostring(map)] then
+    for _, value in ipairs(DB.layerIds[tostring(map)]) do add(value) end
+  end
+  add(id)
+  for _, peer in pairs(layerPeers) do if peer.map == map then add(peer.layer) end end
+  table.sort(ids)
+  for i, value in ipairs(ids) do if value == id then return "Layer " .. i end end
+  return "Layer ?"
+end
+
+local function layerStateMessage()
+  if not (layerState.map and layerState.id) then return nil end
+  local host = DB and DB.set and DB.set.layerHost and 1 or 0
+  local zone = tostring(layerState.zone or ""):gsub("[:|]", " ")
+  return string.format("LY:STATE:%d:%d:%d:%s", layerState.map, layerState.id, host, zone)
+end
+
+local function sendLayerAddon(msg, channel, target)
+  if type(msg) ~= "string" or msg == "" then return false end
+  local fn = C_ChatInfo and C_ChatInfo.SendAddonMessage or SendAddonMessage
+  if type(fn) ~= "function" then return false end
+  local ok = pcall(fn, PREFIX, msg, channel, target)
+  return ok
+end
+
+local function broadcastLayer(msg)
+  if IsInGuild and IsInGuild() then sendLayerAddon(msg, "GUILD") end
+  if IsInGroup and IsInGroup() then
+    if IsInRaid and IsInRaid() then sendLayerAddon(msg, "RAID") else sendLayerAddon(msg, "PARTY") end
+    if layerInInstance() then sendLayerAddon(msg, "INSTANCE_CHAT") end
+  end
+end
+
+local function broadcastLayerState(force)
+  local msg = layerStateMessage()
+  if not msg then return end
+  local now = GetTime()
+  if not force and now - layerLastSent < LAYER_SEND_GAP then return end
+  layerLastSent = now
+  broadcastLayer(msg)
+  for _, peer in pairs(layerPeers) do
+    if peer.full and layerPeerFresh(peer) then sendLayerAddon(msg, "WHISPER", peer.full) end
+  end
+end
+
+local function rememberLayerPeer(name, sender, map, id, host, zone)
+  if not name or name == myName then return end
+  local p = layerPeers[name] or {}
+  p.t = GetTime(); p.full = sender or p.full
+  p.map = tonumber(map) or p.map
+  p.layer = tonumber(id) or p.layer
+  if host ~= nil then p.host = tonumber(host) == 1 end
+  p.zone = zone and zone ~= "" and zone or p.zone
+  layerPeers[name] = p
+  if p.map and p.layer then layerRememberID(p.map, p.layer) end
+  if DB then
+    DB.layerPeers = DB.layerPeers or {}
+    DB.layerPeers[name] = { t = time(), full = p.full, map = p.map, layer = p.layer, host = p.host, zone = p.zone }
+  end
+end
+
+layerPeerFresh = function(peer)
+  return peer and peer.t and GetTime() - peer.t < LAYER_STALE
+end
+
+layerPeerText = function(peer)
+  if not peer then return "Layer unbekannt" end
+  local label = layerLabel(peer.map, peer.layer)
+  if peer.layer then label = label .. " (ID " .. tostring(peer.layer) .. ")" end
+  if layerState.map and peer.map and peer.map ~= layerState.map then return label .. " • andere Zone" end
+  if layerState.id and peer.layer == layerState.id then return label .. " • gleiche Ebene" end
+  if layerState.id and peer.layer then return label .. " • andere Ebene" end
+  return label
+end
+
+layerSummaryText = function()
+  if layerState.status == "instance" then
+    return "|cffaaaaaaLayer-Scan pausiert: Instanz, Schlachtfeld oder Raid.|r"
+  end
+  if not layerState.id then
+    return "|cffffcc44Layer: unbekannt|r  |cffaaaaaaNPC/Fahrzeug anvisieren oder Namensplaketten aktivieren.|r"
+  end
+  local label = layerLabel(layerState.map, layerState.id)
+  local changed = layerState.changedAt > 0 and " • Wechsel " .. date("%H:%M:%S", layerState.changedAt) or ""
+  return "|cffffd100" .. label .. "|r  |cffaaaaaa(ID " .. tostring(layerState.id) .. ")  " ..
+    (layerState.zone or "Zone unbekannt") .. changed .. "|r"
+end
+
+layerScan = function(silent)
+  if not DB then return end
+  if layerInInstance() then
+    layerState.status = "instance"
+    layerState.id = nil
+    if not silent and refreshList then refreshList() end
+    return
+  end
+  if InCombatLockdown and InCombatLockdown() then return end
+  local map = layerMapID()
+  local id = layerDetectID()
+  if not (map and id) then return end
+  local changed = layerState.map ~= map or layerState.id ~= id
+  layerState.map, layerState.id, layerState.zone = map, id, layerZoneText()
+  layerState.t, layerState.status, layerState.source = GetTime(), "detected", "npc-guid"
+  if changed then layerState.changedAt = time() end
+  layerRememberID(map, id)
+  DB.layerCurrent = { map = map, id = id, zone = layerState.zone, seen = time() }
+  if changed then broadcastLayerState(true) else broadcastLayerState(false) end
+  if changed and not silent and refreshList then refreshList() end
+end
+
+requestLayerHop = function(name, peer)
+  peer = peer or layerPeers[name]
+  if not name then return end
+  if peer and layerState.map and peer.map == layerState.map and layerState.id and peer.layer == layerState.id then
+    out(name .. " ist bereits auf deiner aktuellen Ebene.")
+    return
+  end
+  local map = peer and peer.map or layerState.map or 0
+  local id = peer and peer.layer or 0
+  local msg = "LY:ASK:" .. tostring(name) .. ":" .. tostring(map) .. ":" .. tostring(id)
+  broadcastLayer(msg)
+  local full = peer and peer.full or fullName(name)
+  if full then sendLayerAddon(msg, "WHISPER", full) end
+  out("Layer-Hop-Anfrage an " .. name .. " gesendet. Bitte Gruppeneinladung annehmen und Gruppe für den Wechsel behalten.")
+end
+
+layerHopAny = function()
+  local candidate
+  for name, peer in pairs(layerPeers) do
+    if layerPeerFresh(peer) and (not layerState.map or not peer.map or peer.map == layerState.map) and
+      (not layerState.id or not peer.layer or peer.layer ~= layerState.id) then
+      if peer.host then candidate = { name = name, peer = peer }; break end
+      candidate = candidate or { name = name, peer = peer }
+    end
+  end
+  if candidate then requestLayerHop(candidate.name, candidate.peer)
+  else out("Kein anderer bestätigter Layer bekannt. Erst Layer aktualisieren oder einen Gildenkollegen /fg layer ausführen lassen.") end
+end
+
+layerPing = function()
+  layerScan(true)
+  broadcastLayer("LY:HELLO")
+  broadcastLayerState(true)
+end
+
 local function buildPvPWarn()
   local f = CreateFrame("Frame", "ForeverGuildPvP", UIParent)
   f:SetSize(340, 70)
@@ -1476,33 +1808,25 @@ local function buildPvPWarn()
   pvpFrame = f
 end
 
-function handlers.PLAYER_TARGET_CHANGED()
-  if not DB or not DB.pvp then return end
-  if not UnitExists("target") or UnitIsUnit("target", "player") then return end
-  if UnitIsPVP("target") and UnitCanAttack("player", "target") then
-    local key = UnitGUID("target") or UnitName("target")
-    local now = GetTime()
-    if now - (pvpSeen[key] or 0) >= 10 then
-      pvpSeen[key] = now
-      pvpFrame.text:SetText("|cffff3333PVP!|r " .. (UnitName("target") or "?"))
-      pvpFrame.t = 0
-      pvpFrame:Show()
-      if DB.pvpSound then pcall(PlaySound, 8959) end
-    end
-  end
-end
-
 ------------------------------------------------------------------ Tooltip-Erweiterung
 local function tipUnit(tt)
   if not tt.GetUnit then return end
-  local _, unit = tt:GetUnit()
-  if not unit or not UnitIsPlayer(unit) then return end
-  local name = UnitName(unit)
-  local gname, rank = GetGuildInfo(unit)
-  if gname and gname == GetGuildInfo("player") and rank then
+  local okUnit, _, rawUnit = pcall(tt.GetUnit, tt)
+  local unit = okUnit and publicUnitToken(rawUnit) or nil
+  if not unit then return end
+  local isPlayer = publicBool(UnitIsPlayer, unit)
+  if isPlayer ~= true then return end
+  local name = publicString(UnitName, unit)
+  if not name then return end
+  local okGuild, gname, rank = pcall(GetGuildInfo, unit)
+  if not okGuild or isSecretValue(gname) or isSecretValue(rank) then return end
+  local playerGuild = publicString(GetGuildInfo, "player")
+  if gname and gname == playerGuild and rank then
     tt:AddLine("Gildenrang: " .. rank, 0.4, 0.8, 1)
   end
-  local status = UnitIsAFK(unit) and "AFK" or (UnitIsDND(unit) and "DND" or "Online")
+  local isAFK = publicBool(UnitIsAFK, unit)
+  local isDND = publicBool(UnitIsDND, unit)
+  local status = isAFK == true and "AFK" or (isDND == true and "DND" or "Online")
   tt:AddLine("Status: " .. status, 0.7, 0.7, 0.7)
   if members[name] then tt:AddLine(GUILDNAME .. "-Addon", 1, 0.48, 0.1) end
   local p = profText(name)
@@ -1529,7 +1853,9 @@ for _, e in ipairs({ "TRADE_SKILL_SHOW", "TRADE_SKILL_LIST_UPDATE",
 end
 f:SetScript("OnEvent", function(_, event, ...) if handlers[event] then handlers[event](...) end end)
 for _, e in ipairs({ "ADDON_LOADED", "PLAYER_LOGIN", "CHAT_MSG_ADDON", "PLAYER_LEVEL_UP", "PLAYER_DEAD",
-  "GUILD_ROSTER_UPDATE", "CHAT_MSG_LOOT", "SKILL_LINES_CHANGED", "CHAT_MSG_GUILD", "PLAYER_TARGET_CHANGED", "UNIT_HEALTH", "GROUP_ROSTER_UPDATE" }) do f:RegisterEvent(e) end
+  "GUILD_ROSTER_UPDATE", "CHAT_MSG_LOOT", "SKILL_LINES_CHANGED", "CHAT_MSG_GUILD", "PLAYER_TARGET_CHANGED",
+  "UPDATE_MOUSEOVER_UNIT", "NAME_PLATE_UNIT_ADDED", "PLAYER_ENTERING_WORLD", "ZONE_CHANGED_NEW_AREA",
+  "ZONE_CHANGED", "WORLD_STATE_TIMER_START", "CHAT_MSG_SYSTEM", "UNIT_HEALTH", "GROUP_ROSTER_UPDATE" }) do f:RegisterEvent(e) end
 function handlers.ADDON_LOADED(name)
   if name ~= "ForeverGuild" then return end
   ForeverGuildDB = ForeverGuildDB or {}
@@ -1544,12 +1870,21 @@ function handlers.ADDON_LOADED(name)
   local D = { dots = DB.dots ~= false, mini = true, icons = false, showName = false, showLevel = false,
     showRank = false, showHealth = false, iconSize = 13, miniSize = 10, filter = "off", minL = 1, maxL = 100,
     below = 5, above = 5, hpAlert = 0, deathChat = DB.deathChat ~= false, milestones = true,
-    profMile = true, rareLoot = true, autoLog = false, labelSize = 0, miniLabel = true, hideGroup = true }
+    profMile = true, rareLoot = true, autoLog = false, labelSize = 0, miniLabel = true, hideGroup = true,
+    layerHost = false }
   for k, v in pairs(D) do if DB.set[k] == nil then DB.set[k] = v end end
   DB.profs = DB.profs or {}
   DB.recipes = DB.recipes or {}
   for k, v in pairs(DB.profs) do profs[k] = v end
   DB.creators = DB.creators or {}
+  DB.layerIds = DB.layerIds or {}
+  DB.layerPeers = DB.layerPeers or {}
+  for name, saved in pairs(DB.layerPeers) do
+    if type(saved) == "table" and saved.map and saved.layer and saved.t and time() - saved.t < 1800 then
+      layerPeers[name] = { t = GetTime(), full = saved.full, map = saved.map, layer = saved.layer,
+        host = saved.host and true or false, zone = saved.zone }
+    end
+  end
   if DB.pvp == nil then DB.pvp = true end
   if DB.pvpSound == nil then DB.pvpSound = false end
   if DB.deathChat == nil then DB.deathChat = true end
@@ -1563,13 +1898,14 @@ function handlers.PLAYER_LOGIN()
   DB.logApplied = DB.set.autoLog and true or false
   if DB.set.autoLog and LoggingChat then pcall(LoggingChat, true) end
   buildList(); buildBuffFrame(); hookMap(); buildDeathLog(); buildMinimap(); buildPvPWarn(); hookTooltip()
-  local acc, mapAcc, miniAcc, rosAcc = 0, 0, 0, 50
+  local acc, mapAcc, miniAcc, rosAcc, layerAcc = 0, 0, 0, 50, 0
   f:SetScript("OnUpdate", function(_, el)
-    acc = acc + el; mapAcc = mapAcc + el; miniAcc = miniAcc + el; rosAcc = rosAcc + el
+    acc = acc + el; mapAcc = mapAcc + el; miniAcc = miniAcc + el; rosAcc = rosAcc + el; layerAcc = layerAcc + el
     if acc >= DB.interval then acc = 0; broadcastPos() end
     if mapAcc >= 1 then mapAcc = 0; hookMap(); updatePins() end
     if miniAcc >= 0.2 then miniAcc = 0; updateMini() end
     if rosAcc >= 60 then rosAcc = 0; requestRoster() end
+    if layerAcc >= 2 then layerAcc = 0; layerScan(true) end
   end)
   C_Timer.After(6, function() send("H"); broadcastPos(); broadcastProfs(); layerPing() end)
   out("Addon geladen. /ku oder /fg öffnet die Liste, /ku hilfe zeigt alle Befehle.")
@@ -1620,7 +1956,67 @@ function handlers.SKILL_LINES_CHANGED()
   end
 end
 
-function handlers.GROUP_ROSTER_UPDATE() rebuildGroup() end
+function handlers.GROUP_ROSTER_UPDATE()
+  rebuildGroup()
+  layerScan(false)
+  if mode == "layers" then layerPing() end
+end
+
+function handlers.PLAYER_ENTERING_WORLD()
+  C_Timer.After(1, function() layerScan(false); if mode == "layers" then layerPing() end end)
+end
+
+function handlers.ZONE_CHANGED_NEW_AREA()
+  layerState.id, layerState.map, layerState.status = nil, nil, "unknown"
+  C_Timer.After(1, function() layerScan(false); if mode == "layers" then layerPing() end end)
+end
+
+function handlers.ZONE_CHANGED()
+  layerScan(false)
+end
+
+function handlers.PLAYER_TARGET_CHANGED()
+  layerScan(false)
+  if not DB or not DB.pvp then return end
+  local targetExists = publicBool(UnitExists, "target")
+  local sameUnit = publicBool(UnitIsUnit, "target", "player")
+  local targetPVP = publicBool(UnitIsPVP, "target")
+  local canAttack = publicBool(UnitCanAttack, "player", "target")
+  if targetExists ~= true or sameUnit == true then return end
+  -- A nil result means the client deliberately hid the value.  Skipping the
+  -- warning is safer than tainting the secure target/camera path.
+  if targetPVP == true and canAttack == true then
+    local key = publicString(UnitGUID, "target") or publicString(UnitName, "target") or "target"
+    local now = GetTime()
+    if now - (pvpSeen[key] or 0) >= 10 then
+      pvpSeen[key] = now
+      pvpFrame.text:SetText("|cffff3333PVP!|r " .. (publicString(UnitName, "target") or "?"))
+      pvpFrame.t = 0
+      pvpFrame:Show()
+      if DB.pvpSound then pcall(PlaySound, 8959) end
+    end
+  end
+end
+
+function handlers.UPDATE_MOUSEOVER_UNIT()
+  layerScan(false)
+end
+
+function handlers.NAME_PLATE_UNIT_ADDED()
+  layerScan(true)
+end
+
+function handlers.WORLD_STATE_TIMER_START()
+  if DB then DB.layerRefreshAt = time() end
+  if mode == "layers" then refreshList() end
+end
+
+function handlers.CHAT_MSG_SYSTEM(msg)
+  if type(msg) == "string" and msg:lower():find("refresh world", 1, true) then
+    if DB then DB.layerRefreshAt = time() end
+    if mode == "layers" then refreshList() end
+  end
+end
 
 function handlers.GUILD_ROSTER_UPDATE()
   if GetNumGuildMembers then
@@ -1687,22 +2083,40 @@ function handlers.CHAT_MSG_ADDON(prefix, msg, _, sender)
     end
   elseif kind == "LY" then
     if rest == "HELLO" then
-      if name ~= myName then layerPeers[name] = GetTime(); send("LY:HERE") end
+      if name ~= myName then
+        rememberLayerPeer(name, sender)
+        sendLayerAddon("LY:HERE", "WHISPER", sender)
+        broadcastLayerState(true)
+      end
       refreshList()
     elseif rest == "HERE" then
-      if name ~= myName then layerPeers[name] = GetTime() end
+      if name ~= myName then rememberLayerPeer(name, sender) end
       refreshList()
     else
-      local target = rest:match("^ASK:(.+)$")
-      if target == myName and name ~= myName then
-        out("|cffffcc44Layer-Hop-Anfrage von " .. name .. ".|r Lade mit /invite " .. name .. " ein.")
-        if StaticPopupDialogs and StaticPopup_Show then
-          StaticPopupDialogs["FG_LAYER_INVITE"] = StaticPopupDialogs["FG_LAYER_INVITE"] or {
-            text = "%s moechte zu dir wechseln. In Gruppe einladen?", button1 = "Einladen", button2 = "Ablehnen",
-            OnAccept = function(_, data) if data then invitePlayer(data) end end,
-            timeout = 30, whileDead = true, hideOnEscape = true, preferredIndex = 3,
-          }
-          StaticPopup_Show("FG_LAYER_INVITE", name, nil, fullName(name))
+      local map, id, host, zone = rest:match("^STATE:(%d+):(%d+):([01]):?(.*)$")
+      if map and id then
+        rememberLayerPeer(name, sender, tonumber(map), tonumber(id), host, zone)
+        refreshList()
+      else
+        local target, wantMap, wantID = rest:match("^ASK:([^:]+):?(%d*):?(%d*)$")
+        if target == myName and name ~= myName then
+          local wantedMap, wantedID = tonumber(wantMap), tonumber(wantID)
+          local onRequestedLayer = (not wantedMap or wantedMap == 0 or layerState.map == wantedMap) and
+            (not wantedID or wantedID == 0 or layerState.id == wantedID)
+          if not onRequestedLayer then
+            out(name .. " fragt deinen Layer an, aber deine aktuelle Ebene passt nicht zum Ziel.")
+          elseif DB.set.layerHost then
+            invitePlayer(sender or fullName(name))
+            out("Layer-Hop: " .. name .. " wurde automatisch eingeladen.")
+          elseif StaticPopupDialogs and StaticPopup_Show then
+            out("|cffffcc44Layer-Hop-Anfrage von " .. name .. ".|r Bitte Einladung bestätigen.")
+            StaticPopupDialogs["FG_LAYER_INVITE"] = StaticPopupDialogs["FG_LAYER_INVITE"] or {
+              text = "%s moechte zu deinem Layer wechseln. In Gruppe einladen?", button1 = "Einladen", button2 = "Ablehnen",
+              OnAccept = function(_, data) if data then invitePlayer(data) end end,
+              timeout = 30, whileDead = true, hideOnEscape = true, preferredIndex = 3,
+            }
+            StaticPopup_Show("FG_LAYER_INVITE", name, nil, sender or fullName(name))
+          end
         end
       end
     end
@@ -1747,7 +2161,7 @@ end
 
 ------------------------------------------------------------------ Slash
 local function runCheck()
-  out("ForeverGuild v1.6 | Forever-API 16001")
+  out("ForeverGuild v" .. VERSION .. " | Forever-API 16001")
   out("C_SkillInfo: " .. ((C_SkillInfo and C_SkillInfo.GetSkillLineInfo) and "OK" or "fehlt"))
   out("C_TradeSkillUI: " .. ((C_TradeSkillUI and C_TradeSkillUI.GetAllRecipeIDs) and "OK" or "fehlt"))
   local logging = chatLogState()
@@ -1762,6 +2176,8 @@ local function runCheck()
     local previous = DB.__fgProbe
     DB.__fgProbe = true
     out("SavedVariables-Probe: " .. (previous and "vorheriger Wert geladen" or "frische Probe; nach /reload erneut prüfen"))
+    out("Layer: " .. (layerSummaryText and layerSummaryText() or "unbekannt"))
+    out("Layer-Host: " .. (DB.set.layerHost and "an" or "aus") .. " | Scan: NPC-/Fahrzeug-GUIDs")
   else
     out("SavedVariables: DB ist noch nicht geladen")
   end
@@ -1808,8 +2224,22 @@ local function slash(input)
   elseif cmd == "berufe" then
     openProfs()
   elseif cmd == "layer" or cmd == "layers" then
+    local sub = (arg or ""):lower()
+    if sub == "scan" or sub == "refresh" then
+      layerPing(); if listFrame:IsShown() then refreshList() end
+      out("Layer-Daten aktualisiert.")
+    elseif sub == "hop" or sub == "any" then
+      layerHopAny()
+    elseif sub == "host" then
+      DB.set.layerHost = not DB.set.layerHost
+      out("Layer-Host: " .. (DB.set.layerHost and "an" or "aus"))
+    else
+      if not listFrame:IsShown() then listFrame:Show() end
+      setMode("layers")
+    end
+  elseif cmd == "finder" then
     if not listFrame:IsShown() then listFrame:Show() end
-    setMode("layers")
+    setMode("finder")
   elseif cmd == "sync" then
     syncMyRecipes()
   elseif cmd == "check" or cmd == "status" then
@@ -1858,7 +2288,7 @@ local function slash(input)
   else
     out("/fg - Liste | /fg ping | /fg punkte | /fg intervall <2-60> | /fg beruf <name>")
     out("/fg anw [liste] | /fg loot | /fg buff add/del <name> | Strg+Klick auf Karte = Ping")
-    out("/fg layer (Layer-Hop-Reiter) | /fg berufe (Reiter) | /fg sync (eigene Rezepte senden) | /fg check | /fg opt (Einstellungen)")
+    out("/fg layer | /fg layer scan | /fg layer hop | /fg layer host | /fg berufe | /fg sync | /fg check | /fg opt")
     out("/ku test (Beispielmeldungen für die Discord-Bridge) | /fg tod | /fg todchat | /fg pvp | /fg pvpton | /fg creator <Name> <Handle>")
   end
 end

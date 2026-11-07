@@ -2,7 +2,7 @@
 
 World of Warcraft Forever guild addon by Kritisch Ungemütlich.
 
-**Version 1.9.0 für WoW Forever (Interface 16001).**
+**Version 1.9.2 für WoW Forever (Interface 16001).**
 
 <p align="center">
   <img src="./assets/foreverguild-banner.jpg" alt="ForeverGuild Banner" width="100%">
@@ -55,13 +55,23 @@ Create an order in the **Aufträge** tab with item, quantity and note. Other mem
 - `/fg finder` — open the layer/group finder.
 - `/fg karte` — open the online guild map/list.
 
-## Layer Hop (v1.5+)
+## Layer Hop (v1.10+)
 
-Open the **Layer Hop** tab with `/fg layer` or `/ku layer`.
+Open the **Layer** tab with `/fg layer` or `/ku layer`.
 
-Only online guild members who respond from this updated addon are listed. Click a member to send a group-invite request. That member can approve the request and invite you, or decline it. You can also right-click to whisper them.
+ForeverGuild now detects the current raw layer ID experimentally from nearby creature/vehicle GUIDs. Target or mouseover an NPC, or enable nameplates, then use **Layer aktualisieren**. The tab shows a friendly layer label, raw ID, zone, last change, known peers and whether a peer is on the same or another layer.
 
-**Limits:** WoW Forever may not expose a reliable layer ID to addons, so the tab displays "Layer unbekannt" rather than inventing layer numbers. A group invitation may help with layering, but cannot force or guarantee a layer switch. All participants must install v1.5+ for peer discovery and requests. In-game validation on the Forever client is still needed.
+Layer information is shared through guild, party/raid, instance-group and direct addon messages. **Hop Any** chooses another confirmed peer; clicking a peer sends a hop request. The helper must still invite you through Blizzard's normal group system, and the group should remain active after a successful Forever hop.
+
+Commands:
+
+- `/fg layer` — open the Layer tab.
+- `/fg layer scan` — rescan and refresh layer data.
+- `/fg layer hop` — request any other known layer.
+- `/fg layer host` — toggle automatic hosting of matching requests.
+- `/fg check` — include current layer and scan status in diagnostics.
+
+**Limits:** WoW Forever has no documented `GetAllLayers()` or `SwitchToLayer()` API. The raw ID is therefore a client-observed value, not a guaranteed official layer service. Scanning pauses in combat and instances to avoid restricted/secret values. A group invitation may help with layering, but cannot force or guarantee a switch. All participants need the updated ForeverGuild build for peer data and requests.
 
 ## Chat logging
 
