@@ -965,9 +965,13 @@ local function buildList()
   f.finderButton:SetSize(120, 22); f.finderButton:SetPoint("TOPLEFT", 330, -83); f.finderButton:SetText("Gruppe suchen")
   f.finderButton:SetScript("OnClick", function()
     if mode == "layers" then
-      layerPing()
+      local networkOK = layerPing()
       refreshList()
-      out("Layer-Daten aktualisiert.")
+      if networkOK then
+        out("Layer-Daten aktualisiert.")
+      else
+        out("Layer lokal aktualisiert; Netzwerk bleibt blockiert.")
+      end
     end
   end)
   f.layerHopButton = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
@@ -1479,7 +1483,7 @@ end
 local handlers = {}
 
 ------------------------------------------------------------------ Todes-Log
-local VERSION = "1.11.0"
+local VERSION = "1.11.1"
 local lastDeath = {}
 local deathFrame, deathRows = nil, {}
 local DROWS = 15
@@ -1942,10 +1946,13 @@ end
 
 layerPing = function()
   layerScan(true)
-  if broadcastLayer("LY:HELLO") == 0 then
+  local sent = broadcastLayer("LY:HELLO")
+  if sent == 0 then
     out("|cffffcc44Layer-Netzwerk nicht erreichbar:|r " .. commStatusText())
+    return false
   end
   broadcastLayerState(true)
+  return true
 end
 
 local function buildPvPWarn()
@@ -2409,8 +2416,12 @@ local function slash(input)
   elseif cmd == "layer" or cmd == "layers" then
     local sub = (arg or ""):lower()
     if sub == "scan" or sub == "refresh" then
-      layerPing(); if listFrame:IsShown() then refreshList() end
-      out("Layer-Daten aktualisiert.")
+      local networkOK = layerPing(); if listFrame:IsShown() then refreshList() end
+      if networkOK then
+        out("Layer-Daten aktualisiert.")
+      else
+        out("Layer lokal aktualisiert; Netzwerk bleibt blockiert.")
+      end
     elseif sub == "hop" or sub == "any" then
       layerHopAny()
     elseif sub == "host" then

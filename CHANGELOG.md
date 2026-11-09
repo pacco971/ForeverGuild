@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.11.1 — 2026-11-09
+
+- Fixed Layer refresh feedback: blocked addon communication is no longer reported as a successful network update.
+- The Layer tab now distinguishes a local scan from a reachable peer network.
+
 ## 1.11.0 — 2026-11-09
 
 - Added communication diagnostics for outgoing Forever addon messages, including restriction/lockdown state and API result codes.
