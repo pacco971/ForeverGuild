@@ -2,7 +2,7 @@
 
 World of Warcraft Forever guild addon by Kritisch Ungemütlich.
 
-**Version 1.11.2 für WoW Forever (Interface 16001).**
+**Version 1.11.3 für WoW Forever (Interface 16001).**
 
 <p align="center">
   <img src="./assets/foreverguild-banner.jpg" alt="ForeverGuild Banner" width="100%">

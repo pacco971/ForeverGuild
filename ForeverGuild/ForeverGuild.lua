@@ -1,4 +1,4 @@
--- ForeverGuild v1.11.0 - Gilden-Addon fuer WoW Forever
+-- ForeverGuild v1.11.3 - Gilden-Addon fuer WoW Forever
 -- Alle Mitglieder brauchen das Addon, damit sie auf der Karte erscheinen.
 
 local PREFIX = "FGUILD"
@@ -1484,7 +1484,7 @@ end
 local handlers = {}
 
 ------------------------------------------------------------------ Todes-Log
-local VERSION = "1.11.2"
+local VERSION = "1.11.3"
 local lastDeath = {}
 local deathFrame, deathRows = nil, {}
 local DROWS = 15

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.11.3 — 2026-11-09
+
+- Rebuilt the corrected layer-candidate package after the previous CurseForge publish attempt hit a transient server error.
+- Keeps the clear distinction between local candidate data and confirmed/probable layer data.
+- Keeps the blocked-outgoing-addon diagnostic explicit instead of reporting a false network refresh.
+
 ## 1.11.2 — 2026-11-09
 
 - Weak single-observation layer IDs are now displayed as candidates instead of false confirmed layer changes.
