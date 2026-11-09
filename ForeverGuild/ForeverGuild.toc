@@ -2,7 +2,7 @@
 ## Title: |cffff7a1aKritisch Ungemütlich|r
 ## Notes: Das Gilden-Addon von Kritisch Ungemütlich: Gildenkarte, Dashboard, Berufe/Rezeptkatalog, Aktivität, Crafting-Aufträge, Gruppenfinder, Layer-Hop, Todes-Log und PvP-Warnung
 ## Author: Pacco
-## Version: 1.10.0
+## Version: 1.11.0
 ## X-Curse-Project-ID: 1781463
 ## SavedVariables: ForeverGuildDB
 

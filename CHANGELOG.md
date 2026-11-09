@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.11.0 — 2026-11-09
+
+- Added communication diagnostics for outgoing Forever addon messages, including restriction/lockdown state and API result codes.
+- Added layer confidence levels and ignored weak single-observation layer IDs for hop targets.
+- Added layer-hop verification: requests now wait for a confirmed target/new layer and report success or timeout.
+- Added host availability, peer confidence and stale-world-refresh state to the Layer tab.
+- Added compatibility parsing for both the new scored layer state message and older 1.10 peers.
+- Updated Forever installation instructions and layer limitations for the `_forever_` client.
+- Cleaned release packaging so generated CurseForge archives do not contain a nested ZIP.
+
 ## 1.10.0 — 2026-11-07
 
 - Added experimental Forever layer detection from nearby creature and vehicle GUIDs.

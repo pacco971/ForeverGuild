@@ -1,4 +1,4 @@
--- ForeverGuild v1.10.0 - Gilden-Addon fuer WoW Forever
+-- ForeverGuild v1.11.0 - Gilden-Addon fuer WoW Forever
 -- Alle Mitglieder brauchen das Addon, damit sie auf der Karte erscheinen.
 
 local PREFIX = "FGUILD"
@@ -8,6 +8,84 @@ local DB
 local myName = UnitName("player")
 local GUILDNAME = "Kritisch Ungemütlich"
 local BRAND = "|cffff7a1a" .. GUILDNAME .. "|r"
+local commState = {
+  lastResult = nil, lastChannel = nil, lastTarget = nil, lastAt = 0,
+  successes = 0, failures = 0,
+}
+
+local SEND_RESULT_NAMES = {
+  [0] = "OK", [1] = "InvalidPrefix", [2] = "InvalidMessage",
+  [3] = "AddonMessageThrottle", [4] = "InvalidChatType", [5] = "NotInGroup",
+  [6] = "TargetRequired", [7] = "InvalidChannel", [8] = "ChannelThrottle",
+  [9] = "GeneralError", [10] = "NotInGuild", [11] = "AddOnMessageLockdown",
+  [12] = "TargetOffline",
+}
+
+local function commRestrictions()
+  local restricted, lockdown
+  if C_ChatInfo and C_ChatInfo.AreOutgoingAddonChatMessagesRestricted then
+    local ok, value = pcall(C_ChatInfo.AreOutgoingAddonChatMessagesRestricted)
+    if ok and type(value) == "boolean" then restricted = value end
+  end
+  if C_ChatInfo and C_ChatInfo.InChatMessagingLockdown then
+    local ok, value = pcall(C_ChatInfo.InChatMessagingLockdown)
+    if ok and type(value) == "boolean" then lockdown = value end
+  end
+  return restricted, lockdown
+end
+
+local function commResultName(result)
+  if result == nil then return "unbekannt" end
+  if type(result) == "number" then return SEND_RESULT_NAMES[result] or ("Code " .. tostring(result)) end
+  if result == true then return "OK" end
+  return tostring(result)
+end
+
+local function rememberComm(result, channel, target, success)
+  commState.lastResult, commState.lastChannel, commState.lastTarget = result, channel, target
+  commState.lastAt = time and time() or 0
+  if success then commState.successes = commState.successes + 1
+  else commState.failures = commState.failures + 1 end
+end
+
+local function sendAddonMessage(msg, channel, target)
+  if type(msg) ~= "string" or msg == "" then return false, "InvalidMessage" end
+  local restricted, lockdown = commRestrictions()
+  if restricted == true then
+    rememberComm("restricted", channel, target, false)
+    return false, "restricted"
+  end
+  if lockdown == true then
+    rememberComm("lockdown", channel, target, false)
+    return false, "lockdown"
+  end
+  local fn = C_ChatInfo and C_ChatInfo.SendAddonMessage or SendAddonMessage
+  if type(fn) ~= "function" then
+    rememberComm("missing", channel, target, false)
+    return false, "missing"
+  end
+  local ok, result = pcall(fn, PREFIX, msg, channel, target)
+  if not ok then
+    rememberComm("lua-error", channel, target, false)
+    return false, "lua-error"
+  end
+  -- The modern API returns Enum.SendAddonMessageResult; legacy clients may
+  -- return nil after enqueueing successfully.
+  local success = result == nil or result == true or result == 0
+  rememberComm(result, channel, target, success)
+  return success, commResultName(result)
+end
+
+local function commStatusText()
+  local restricted, lockdown = commRestrictions()
+  if restricted == true then return "|cffff4444blockiert: Outgoing Addon Messages|r" end
+  if lockdown == true then return "|cffffcc44gesperrt: Chat-Messaging-Lockdown|r" end
+  if commState.lastResult ~= nil and commState.lastResult ~= 0 and commState.lastResult ~= true then
+    return "|cffffcc44Fehler: " .. commResultName(commState.lastResult) .. "|r"
+  end
+  if commState.successes > 0 then return "|cff55dd88bereit|r" end
+  return "|cffaaaaaaungetestet|r"
+end
 local rankCache = {}
 local groupSet = {}
 local function rebuildGroup()
@@ -83,11 +161,7 @@ end
 ------------------------------------------------------------------ Comms
 local function send(msg)
   if not IsInGuild() then return end
-  if C_ChatInfo and C_ChatInfo.SendAddonMessage then
-    C_ChatInfo.SendAddonMessage(PREFIX, msg, "GUILD")
-  elseif SendAddonMessage then
-    SendAddonMessage(PREFIX, msg, "GUILD")
-  end
+  return sendAddonMessage(msg, "GUILD")
 end
 
 ------------------------------------------------------------------ Position
@@ -450,10 +524,11 @@ local roster, guildRoster, onlineInfo, view, mode = {}, {}, {}, {}, "who"
 local layerPeers = {}
 local layerState = {
   map = nil, id = nil, zone = nil, t = 0, status = "unknown",
-  changedAt = 0, source = nil,
+  changedAt = 0, source = nil, score = 0, confidence = "unknown",
 }
-local layerScan, layerSummaryText, layerPeerFresh, layerPeerText
+local layerScan, layerSummaryText, layerPeerFresh, layerPeerText, checkLayerHop
 local layerPing, requestLayerHop, layerHopAny
+local layerPendingHop
 local recipeExpanded = {}
 local finderPosts = {}
 local refreshList
@@ -616,7 +691,7 @@ local function buildView()
 
   if mode == "layers" then
     view[#view + 1] = { text = layerSummaryText and layerSummaryText() or "|cffaaaaaaLayer-Daten werden geladen ...|r", layerSummary = true }
-    view[#view + 1] = { text = "|cff888888Klick auf einen bekannten Layer für eine Hop-Anfrage. Hop Any nimmt einen anderen bekannten Layer.|r", layerSummary = true }
+    view[#view + 1] = { text = "|cff888888Nur wahrscheinliche/bestätigte Layer sind Hop-Ziele. Hop Any bevorzugt einen Host; danach wird der Wechsel bis zu 25 Sek. geprüft.|r", layerSummary = true }
     local finderQ = ((listFrame and listFrame.finderInput and listFrame.finderInput:GetText()) or ""):lower()
     if finderQ == "zone / layer / spieler" or finderQ == "dungeon / ziel / zone" then finderQ = "" end
     local seen = {}
@@ -1404,7 +1479,7 @@ end
 local handlers = {}
 
 ------------------------------------------------------------------ Todes-Log
-local VERSION = "1.10.0"
+local VERSION = "1.11.0"
 local lastDeath = {}
 local deathFrame, deathRows = nil, {}
 local DROWS = 15
@@ -1618,6 +1693,22 @@ local function layerDetectID()
   return best, score
 end
 
+local function layerConfidence(score)
+  score = tonumber(score) or 0
+  if score >= 3 then return "confirmed" end
+  if score >= 2 then return "probable" end
+  if score == 1 then return "weak" end
+  return "unknown"
+end
+
+local function layerConfidenceText(value)
+  if value == "confirmed" then return "|cff55dd88bestätigt|r" end
+  if value == "probable" then return "|cffffd100wahrscheinlich|r" end
+  if value == "weak" then return "|cffff8844schwach erkannt|r" end
+  if value == "stale" then return "|cffff8844veraltet|r" end
+  return "|cffaaaaaaunbekannt|r"
+end
+
 local function layerRememberID(map, id)
   if not (DB and map and id) then return end
   DB.layerIds = DB.layerIds or {}
@@ -1640,31 +1731,35 @@ local function layerLabel(map, id)
   add(id)
   for _, peer in pairs(layerPeers) do if peer.map == map then add(peer.layer) end end
   table.sort(ids)
-  for i, value in ipairs(ids) do if value == id then return "Layer " .. i end end
-  return "Layer ?"
+  for i, value in ipairs(ids) do if value == id then return "Lokaler Layer " .. i end end
+  return "Lokaler Layer ?"
 end
 
 local function layerStateMessage()
-  if not (layerState.map and layerState.id) then return nil end
+  if not (layerState.map and layerState.id and
+      (layerState.confidence == "probable" or layerState.confidence == "confirmed")) then return nil end
   local host = DB and DB.set and DB.set.layerHost and 1 or 0
   local zone = tostring(layerState.zone or ""):gsub("[:|]", " ")
-  return string.format("LY:STATE:%d:%d:%d:%s", layerState.map, layerState.id, host, zone)
+  return string.format("LY:STATE:%d:%d:%d:%d:%s", layerState.map, layerState.id, host,
+    math.max(1, tonumber(layerState.score) or 1), zone)
 end
 
 local function sendLayerAddon(msg, channel, target)
-  if type(msg) ~= "string" or msg == "" then return false end
-  local fn = C_ChatInfo and C_ChatInfo.SendAddonMessage or SendAddonMessage
-  if type(fn) ~= "function" then return false end
-  local ok = pcall(fn, PREFIX, msg, channel, target)
-  return ok
+  return sendAddonMessage(msg, channel, target)
 end
 
 local function broadcastLayer(msg)
-  if IsInGuild and IsInGuild() then sendLayerAddon(msg, "GUILD") end
+  local sent = 0
+  if IsInGuild and IsInGuild() then if sendLayerAddon(msg, "GUILD") then sent = sent + 1 end end
   if IsInGroup and IsInGroup() then
-    if IsInRaid and IsInRaid() then sendLayerAddon(msg, "RAID") else sendLayerAddon(msg, "PARTY") end
-    if layerInInstance() then sendLayerAddon(msg, "INSTANCE_CHAT") end
+    if IsInRaid and IsInRaid() then
+      if sendLayerAddon(msg, "RAID") then sent = sent + 1 end
+    else
+      if sendLayerAddon(msg, "PARTY") then sent = sent + 1 end
+    end
+    if layerInInstance() and sendLayerAddon(msg, "INSTANCE_CHAT") then sent = sent + 1 end
   end
+  return sent
 end
 
 local function broadcastLayerState(force)
@@ -1679,19 +1774,21 @@ local function broadcastLayerState(force)
   end
 end
 
-local function rememberLayerPeer(name, sender, map, id, host, zone)
+local function rememberLayerPeer(name, sender, map, id, host, zone, score)
   if not name or name == myName then return end
   local p = layerPeers[name] or {}
   p.t = GetTime(); p.full = sender or p.full
   p.map = tonumber(map) or p.map
   p.layer = tonumber(id) or p.layer
+  p.score = tonumber(score) or tonumber(p.score) or 0
   if host ~= nil then p.host = tonumber(host) == 1 end
   p.zone = zone and zone ~= "" and zone or p.zone
   layerPeers[name] = p
   if p.map and p.layer then layerRememberID(p.map, p.layer) end
   if DB then
     DB.layerPeers = DB.layerPeers or {}
-    DB.layerPeers[name] = { t = time(), full = p.full, map = p.map, layer = p.layer, host = p.host, zone = p.zone }
+    DB.layerPeers[name] = { t = time(), full = p.full, map = p.map, layer = p.layer,
+      score = p.score, host = p.host, zone = p.zone }
   end
 end
 
@@ -1703,10 +1800,13 @@ layerPeerText = function(peer)
   if not peer then return "Layer unbekannt" end
   local label = layerLabel(peer.map, peer.layer)
   if peer.layer then label = label .. " (ID " .. tostring(peer.layer) .. ")" end
-  if layerState.map and peer.map and peer.map ~= layerState.map then return label .. " • andere Zone" end
-  if layerState.id and peer.layer == layerState.id then return label .. " • gleiche Ebene" end
-  if layerState.id and peer.layer then return label .. " • andere Ebene" end
-  return label
+  local relation = ""
+  if layerState.map and peer.map and peer.map ~= layerState.map then relation = " • andere Zone"
+  elseif layerState.id and peer.layer == layerState.id then relation = " • gleiche Ebene"
+  elseif layerState.id and peer.layer then relation = " • andere Ebene" end
+  local host = peer.host and " • Host verfügbar" or ""
+  local confidence = peer.score and peer.score < 2 and " • unsicher" or ""
+  return label .. relation .. host .. confidence
 end
 
 layerSummaryText = function()
@@ -1714,12 +1814,14 @@ layerSummaryText = function()
     return "|cffaaaaaaLayer-Scan pausiert: Instanz, Schlachtfeld oder Raid.|r"
   end
   if not layerState.id then
-    return "|cffffcc44Layer: unbekannt|r  |cffaaaaaaNPC/Fahrzeug anvisieren oder Namensplaketten aktivieren.|r"
+    return "|cffffcc44Layer: unbekannt|r  |cffaaaaaaNPC/Fahrzeug anvisieren oder Namensplaketten aktivieren.|r  " .. commStatusText()
   end
   local label = layerLabel(layerState.map, layerState.id)
   local changed = layerState.changedAt > 0 and " • Wechsel " .. date("%H:%M:%S", layerState.changedAt) or ""
+  local stale = layerState.status == "refresh" and " • World Refresh" or ""
   return "|cffffd100" .. label .. "|r  |cffaaaaaa(ID " .. tostring(layerState.id) .. ")  " ..
-    (layerState.zone or "Zone unbekannt") .. changed .. "|r"
+    (layerState.zone or "Zone unbekannt") .. changed .. stale .. "|r  " ..
+    layerConfidenceText(layerState.confidence) .. "  " .. commStatusText()
 end
 
 layerScan = function(silent)
@@ -1727,36 +1829,101 @@ layerScan = function(silent)
   if layerInInstance() then
     layerState.status = "instance"
     layerState.id = nil
+    layerState.confidence, layerState.score = "unknown", 0
     if not silent and refreshList then refreshList() end
     return
   end
   if InCombatLockdown and InCombatLockdown() then return end
   local map = layerMapID()
-  local id = layerDetectID()
+  local id, score = layerDetectID()
   if not (map and id) then return end
+  local confidence = layerConfidence(score)
   local changed = layerState.map ~= map or layerState.id ~= id
   layerState.map, layerState.id, layerState.zone = map, id, layerZoneText()
+  layerState.score, layerState.confidence = score, confidence
   layerState.t, layerState.status, layerState.source = GetTime(), "detected", "npc-guid"
   if changed then layerState.changedAt = time() end
-  layerRememberID(map, id)
-  DB.layerCurrent = { map = map, id = id, zone = layerState.zone, seen = time() }
-  if changed then broadcastLayerState(true) else broadcastLayerState(false) end
+  if confidence ~= "weak" then layerRememberID(map, id) end
+  DB.layerCurrent = { map = map, id = id, zone = layerState.zone, score = score,
+    confidence = confidence, seen = time() }
+  checkLayerHop()
+  if confidence ~= "weak" then
+    if changed then broadcastLayerState(true) else broadcastLayerState(false) end
+  end
   if changed and not silent and refreshList then refreshList() end
+end
+
+local function markLayerRefresh()
+  if not DB then return end
+  DB.layerRefreshAt = time()
+  if layerState.id then
+    layerState.status = "refresh"
+    layerState.confidence = "stale"
+  else
+    layerState.status = "unknown"
+  end
+  if mode == "layers" and refreshList then refreshList() end
+end
+
+checkLayerHop = function()
+  local pending = layerPendingHop
+  if not pending then return end
+  local elapsed = GetTime() - pending.sentAt
+  local reached = pending.targetMap and pending.targetID and pending.targetID > 0 and
+    layerState.map == pending.targetMap and layerState.id == pending.targetID and
+    layerState.confidence ~= "weak"
+  local changed = pending.startMap and pending.startID and layerState.map and layerState.id and
+    (layerState.map ~= pending.startMap or layerState.id ~= pending.startID) and
+    layerState.confidence ~= "weak"
+  if reached or changed then
+    local who = pending.name or "Ziel"
+    layerPendingHop = nil
+    out("|cff55dd88Layer-Hop erfolgreich:|r " .. who .. " • " .. (layerSummaryText() or "neuer Layer") ..
+      "  Gruppe bitte behalten, bis du fertig bist.")
+    if refreshList then refreshList() end
+  elseif elapsed >= 25 then
+    local who = pending.name or "Ziel"
+    layerPendingHop = nil
+    out("|cffff8844Layer-Hop nicht bestätigt:|r " .. who ..
+      ". Einladung annehmen und danach erneut Layer aktualisieren.")
+    if refreshList then refreshList() end
+  end
 end
 
 requestLayerHop = function(name, peer)
   peer = peer or layerPeers[name]
   if not name then return end
+  if not peer or not peer.layer then
+    out("Für " .. name .. " ist noch kein Layer-Ziel bekannt. Erst /fg layer scan ausführen.")
+    return
+  end
+  if (tonumber(peer.score) or 0) < 2 then
+    out("Layer von " .. name .. " ist nur schwach erkannt. Erst beide Spieler NPC/Namensplaketten scannen lassen.")
+    return
+  end
+  if layerState.map and peer.map and peer.map ~= layerState.map then
+    out("Layer-Hop übersprungen: " .. name .. " ist in einer anderen Zone.")
+    return
+  end
   if peer and layerState.map and peer.map == layerState.map and layerState.id and peer.layer == layerState.id then
     out(name .. " ist bereits auf deiner aktuellen Ebene.")
     return
   end
   local map = peer and peer.map or layerState.map or 0
-  local id = peer and peer.layer or 0
+  local id = peer.layer
   local msg = "LY:ASK:" .. tostring(name) .. ":" .. tostring(map) .. ":" .. tostring(id)
-  broadcastLayer(msg)
   local full = peer and peer.full or fullName(name)
-  if full then sendLayerAddon(msg, "WHISPER", full) end
+  local sent = 0
+  if full and sendLayerAddon(msg, "WHISPER", full) then sent = sent + 1 end
+  sent = sent + broadcastLayer(msg)
+  if sent == 0 then
+    out("|cffff4444Layer-Kommunikation blockiert:|r " .. commStatusText())
+    return
+  end
+  layerPendingHop = {
+    name = name, targetMap = peer and peer.map or nil, targetID = peer and peer.layer or nil,
+    startMap = layerState.map, startID = layerState.id, sentAt = GetTime(),
+  }
   out("Layer-Hop-Anfrage an " .. name .. " gesendet. Bitte Gruppeneinladung annehmen und Gruppe für den Wechsel behalten.")
 end
 
@@ -1764,7 +1931,7 @@ layerHopAny = function()
   local candidate
   for name, peer in pairs(layerPeers) do
     if layerPeerFresh(peer) and (not layerState.map or not peer.map or peer.map == layerState.map) and
-      (not layerState.id or not peer.layer or peer.layer ~= layerState.id) then
+      peer.layer and (peer.score or 2) >= 2 and (not layerState.id or peer.layer ~= layerState.id) then
       if peer.host then candidate = { name = name, peer = peer }; break end
       candidate = candidate or { name = name, peer = peer }
     end
@@ -1775,7 +1942,9 @@ end
 
 layerPing = function()
   layerScan(true)
-  broadcastLayer("LY:HELLO")
+  if broadcastLayer("LY:HELLO") == 0 then
+    out("|cffffcc44Layer-Netzwerk nicht erreichbar:|r " .. commStatusText())
+  end
   broadcastLayerState(true)
 end
 
@@ -1868,7 +2037,7 @@ function handlers.ADDON_LOADED(name)
   DB.deaths = DB.deaths or {}
   DB.set = DB.set or {}
   local D = { dots = DB.dots ~= false, mini = true, icons = false, showName = false, showLevel = false,
-    showRank = false, showHealth = false, iconSize = 13, miniSize = 10, filter = "off", minL = 1, maxL = 100,
+    showRank = false, showHealth = false, iconSize = 13, miniSize = 10, filter = "off", minL = 1, maxL = 60,
     below = 5, above = 5, hpAlert = 0, deathChat = DB.deathChat ~= false, milestones = true,
     profMile = true, rareLoot = true, autoLog = false, labelSize = 0, miniLabel = true, hideGroup = true,
     layerHost = false }
@@ -1882,7 +2051,7 @@ function handlers.ADDON_LOADED(name)
   for name, saved in pairs(DB.layerPeers) do
     if type(saved) == "table" and saved.map and saved.layer and saved.t and time() - saved.t < 1800 then
       layerPeers[name] = { t = GetTime(), full = saved.full, map = saved.map, layer = saved.layer,
-        host = saved.host and true or false, zone = saved.zone }
+        score = tonumber(saved.score) or 0, host = saved.host and true or false, zone = saved.zone }
     end
   end
   if DB.pvp == nil then DB.pvp = true end
@@ -2007,14 +2176,15 @@ function handlers.NAME_PLATE_UNIT_ADDED()
 end
 
 function handlers.WORLD_STATE_TIMER_START()
-  if DB then DB.layerRefreshAt = time() end
-  if mode == "layers" then refreshList() end
+  markLayerRefresh()
 end
 
 function handlers.CHAT_MSG_SYSTEM(msg)
-  if type(msg) == "string" and msg:lower():find("refresh world", 1, true) then
-    if DB then DB.layerRefreshAt = time() end
-    if mode == "layers" then refreshList() end
+  if type(msg) ~= "string" then return end
+  local text = msg:lower()
+  if text:find("refresh world", 1, true) or text:find("world refresh", 1, true) or
+      text:find("welt wird aktualisiert", 1, true) or text:find("weltaktual", 1, true) then
+    markLayerRefresh()
   end
 end
 
@@ -2093,11 +2263,17 @@ function handlers.CHAT_MSG_ADDON(prefix, msg, _, sender)
       if name ~= myName then rememberLayerPeer(name, sender) end
       refreshList()
     else
-      local map, id, host, zone = rest:match("^STATE:(%d+):(%d+):([01]):?(.*)$")
+      local map, id, host, score, zone = rest:match("^STATE:(%d+):(%d+):([01]):(%d+):?(.*)$")
       if map and id then
-        rememberLayerPeer(name, sender, tonumber(map), tonumber(id), host, zone)
+        rememberLayerPeer(name, sender, tonumber(map), tonumber(id), host, zone, tonumber(score))
         refreshList()
       else
+        local legacyMap, legacyID, legacyHost, legacyZone = rest:match("^STATE:(%d+):(%d+):([01]):?(.*)$")
+        if legacyMap and legacyID then
+          rememberLayerPeer(name, sender, tonumber(legacyMap), tonumber(legacyID), legacyHost, legacyZone, 1)
+          refreshList()
+          return
+        end
         local target, wantMap, wantID = rest:match("^ASK:([^:]+):?(%d*):?(%d*)$")
         if target == myName and name ~= myName then
           local wantedMap, wantedID = tonumber(wantMap), tonumber(wantID)
@@ -2164,6 +2340,13 @@ local function runCheck()
   out("ForeverGuild v" .. VERSION .. " | Forever-API 16001")
   out("C_SkillInfo: " .. ((C_SkillInfo and C_SkillInfo.GetSkillLineInfo) and "OK" or "fehlt"))
   out("C_TradeSkillUI: " .. ((C_TradeSkillUI and C_TradeSkillUI.GetAllRecipeIDs) and "OK" or "fehlt"))
+  local last = commState.lastAt and commState.lastAt > 0 and date("%H:%M:%S", commState.lastAt) or "nie"
+  out("Addon-Kommunikation: " .. commStatusText() .. " | OK " .. commState.successes ..
+    " / Fehler " .. commState.failures .. " | letzter Versuch: " .. last)
+  if commState.lastChannel then
+    out("  Kanal: " .. tostring(commState.lastChannel) .. (commState.lastTarget and (" -> " .. tostring(commState.lastTarget)) or "") ..
+      " | Ergebnis: " .. commResultName(commState.lastResult))
+  end
   local logging = chatLogState()
   if logging == true then
     out("Chatlog: AN (WoWChatLog.txt wird vom Client geschrieben)")
