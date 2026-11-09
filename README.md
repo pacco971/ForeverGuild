@@ -2,7 +2,7 @@
 
 World of Warcraft Forever guild addon by Kritisch Ungemütlich.
 
-**Version 1.11.1 für WoW Forever (Interface 16001).**
+**Version 1.11.2 für WoW Forever (Interface 16001).**
 
 <p align="center">
   <img src="./assets/foreverguild-banner.jpg" alt="ForeverGuild Banner" width="100%">
@@ -59,7 +59,7 @@ Create an order in the **Aufträge** tab with item, quantity and note. Other mem
 
 Open the **Layer** tab with `/fg layer` or `/ku layer`.
 
-ForeverGuild detects the current raw layer ID experimentally from several nearby creature/vehicle GUID observations. Target or mouseover an NPC, or enable nameplates, then use **Layer aktualisieren**. The tab shows a local comparison label, raw ID, zone, last change, detection confidence, known peers and whether a peer is on the same or another layer. “Lokaler Layer 1/2/…” is only an ordering of IDs seen by your guild; it is not an official server layer number.
+ForeverGuild detects the current raw layer ID experimentally from several nearby creature/vehicle GUID observations. Target or mouseover an NPC, or enable nameplates, then use **Layer aktualisieren**. The tab shows a local comparison label, raw ID, zone, last change, detection confidence, known peers and whether a peer is on the same or another layer. A single observation is shown as a **Layer-Kandidat** until at least two observations agree. “Lokaler Layer 1/2/…” is only an ordering of IDs seen by your guild; it is not an official server layer number.
 
 Layer information is shared through guild, party/raid, instance-group and direct addon messages. The addon now reports outgoing-message restrictions and API result codes in `/fg check`. **Hop Any** chooses a fresh peer with at least two matching observations and prefers a configured host. Clicking a peer sends a hop request. The helper must still invite you through Blizzard's normal group system, and the group should remain active after a successful Forever hop. The addon verifies the result for up to 25 seconds and reports success or timeout instead of pretending that an invitation changed the layer.
 

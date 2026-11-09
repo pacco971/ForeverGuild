@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.11.2 — 2026-11-09
+
+- Weak single-observation layer IDs are now displayed as candidates instead of false confirmed layer changes.
+- Candidate IDs are cleared on world refresh and zone changes.
+- The Layer summary now makes the difference between a local candidate and a confirmed/probable layer explicit.
+
 ## 1.11.1 — 2026-11-09
 
 - Fixed Layer refresh feedback: blocked addon communication is no longer reported as a successful network update.

@@ -525,6 +525,7 @@ local layerPeers = {}
 local layerState = {
   map = nil, id = nil, zone = nil, t = 0, status = "unknown",
   changedAt = 0, source = nil, score = 0, confidence = "unknown",
+  candidateMap = nil, candidateID = nil, candidateZone = nil, candidateScore = 0,
 }
 local layerScan, layerSummaryText, layerPeerFresh, layerPeerText, checkLayerHop
 local layerPing, requestLayerHop, layerHopAny
@@ -1483,7 +1484,7 @@ end
 local handlers = {}
 
 ------------------------------------------------------------------ Todes-Log
-local VERSION = "1.11.1"
+local VERSION = "1.11.2"
 local lastDeath = {}
 local deathFrame, deathRows = nil, {}
 local DROWS = 15
@@ -1818,13 +1819,20 @@ layerSummaryText = function()
     return "|cffaaaaaaLayer-Scan pausiert: Instanz, Schlachtfeld oder Raid.|r"
   end
   if not layerState.id then
+    if layerState.candidateID then
+      return "|cffff8844Layer-Kandidat|r  |cffaaaaaa(ID " .. tostring(layerState.candidateID) .. ")  " ..
+        (layerState.candidateZone or "Zone unbekannt") .. "|r  " ..
+        layerConfidenceText("weak") .. "  " .. commStatusText()
+    end
     return "|cffffcc44Layer: unbekannt|r  |cffaaaaaaNPC/Fahrzeug anvisieren oder Namensplaketten aktivieren.|r  " .. commStatusText()
   end
   local label = layerLabel(layerState.map, layerState.id)
   local changed = layerState.changedAt > 0 and " • Wechsel " .. date("%H:%M:%S", layerState.changedAt) or ""
   local stale = layerState.status == "refresh" and " • World Refresh" or ""
+  local candidate = layerState.candidateID and layerState.candidateID ~= layerState.id and
+    (" • Kandidat ID " .. tostring(layerState.candidateID)) or ""
   return "|cffffd100" .. label .. "|r  |cffaaaaaa(ID " .. tostring(layerState.id) .. ")  " ..
-    (layerState.zone or "Zone unbekannt") .. changed .. stale .. "|r  " ..
+    (layerState.zone or "Zone unbekannt") .. changed .. stale .. candidate .. "|r  " ..
     layerConfidenceText(layerState.confidence) .. "  " .. commStatusText()
 end
 
@@ -1834,6 +1842,8 @@ layerScan = function(silent)
     layerState.status = "instance"
     layerState.id = nil
     layerState.confidence, layerState.score = "unknown", 0
+    layerState.candidateMap, layerState.candidateID, layerState.candidateZone = nil, nil, nil
+    layerState.candidateScore = 0
     if not silent and refreshList then refreshList() end
     return
   end
@@ -1842,10 +1852,28 @@ layerScan = function(silent)
   local id, score = layerDetectID()
   if not (map and id) then return end
   local confidence = layerConfidence(score)
+  local zone = layerZoneText()
+  if confidence == "weak" then
+    layerState.candidateMap, layerState.candidateID = map, id
+    layerState.candidateZone, layerState.candidateScore = zone, score
+    layerState.t, layerState.source = GetTime(), "npc-guid"
+    if not (layerState.id and (layerState.confidence == "probable" or layerState.confidence == "confirmed") and
+        layerState.map == map) then
+      layerState.map, layerState.id, layerState.zone = map, nil, zone
+      layerState.score, layerState.confidence, layerState.status = score, "weak", "candidate"
+    end
+    DB.layerCandidate = { map = map, id = id, zone = zone, score = score, seen = time() }
+    checkLayerHop()
+    if not silent and refreshList then refreshList() end
+    return
+  end
   local changed = layerState.map ~= map or layerState.id ~= id
-  layerState.map, layerState.id, layerState.zone = map, id, layerZoneText()
+  layerState.map, layerState.id, layerState.zone = map, id, zone
   layerState.score, layerState.confidence = score, confidence
   layerState.t, layerState.status, layerState.source = GetTime(), "detected", "npc-guid"
+  layerState.candidateMap, layerState.candidateID, layerState.candidateZone = nil, nil, nil
+  layerState.candidateScore = 0
+  DB.layerCandidate = nil
   if changed then layerState.changedAt = time() end
   if confidence ~= "weak" then layerRememberID(map, id) end
   DB.layerCurrent = { map = map, id = id, zone = layerState.zone, score = score,
@@ -1860,6 +1888,9 @@ end
 local function markLayerRefresh()
   if not DB then return end
   DB.layerRefreshAt = time()
+  DB.layerCandidate = nil
+  layerState.candidateMap, layerState.candidateID, layerState.candidateZone = nil, nil, nil
+  layerState.candidateScore = 0
   if layerState.id then
     layerState.status = "refresh"
     layerState.confidence = "stale"
@@ -2144,6 +2175,8 @@ end
 
 function handlers.ZONE_CHANGED_NEW_AREA()
   layerState.id, layerState.map, layerState.status = nil, nil, "unknown"
+  layerState.candidateMap, layerState.candidateID, layerState.candidateZone = nil, nil, nil
+  layerState.candidateScore = 0
   C_Timer.After(1, function() layerScan(false); if mode == "layers" then layerPing() end end)
 end
 
